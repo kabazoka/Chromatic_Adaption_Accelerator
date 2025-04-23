@@ -1,0 +1,3 @@
+# Icarus Verilog simulation files
+*.vcd
+*.vvp
