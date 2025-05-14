@@ -7,7 +7,7 @@ module cct_to_xyz_converter (
     input wire cct_valid,            // CCT value is valid
     
     // Output XYZ values
-    output reg [(2-0)*(31-0+1)+(31-0):0] xyz_out, // X, Y, Z values in fixed-point format
+    output reg [95:0] xyz_out,       // X, Y, Z values in fixed-point format
     output reg xyz_valid             // XYZ values are valid
 );
 
@@ -44,7 +44,7 @@ module cct_to_xyz_converter (
             result = a * b;
             fp_multiply = result >> FRAC_BITS;
         end
-    endtask
+    endfunction
     
     function [31:0] fp_divide;
         input [31:0] a;
@@ -54,7 +54,7 @@ module cct_to_xyz_converter (
             result = (a << FRAC_BITS) / b;
             fp_divide = result[31:0];
         end
-    endtask
+    endfunction
     
     // State machine
     always @(posedge clk or negedge rst_n) begin
@@ -63,9 +63,7 @@ module cct_to_xyz_converter (
             cct_value <= 16'd0;
             x_coord <= 32'd0;
             y_coord <= 32'd0;
-            xyz_out[0] <= 32'd0;  // X
-            xyz_out[1] <= 32'd0;  // Y
-            xyz_out[2] <= 32'd0;  // Z
+            xyz_out <= 96'd0;
             xyz_valid <= 1'b0;
         end else begin
             // Default signal values
@@ -111,13 +109,13 @@ module cct_to_xyz_converter (
                     // Z = ((1-x-y)/y) * Y
                     
                     // X = (x/y) * 1.0
-                    xyz_out[0] <= fp_divide(x_coord, y_coord);
+                    xyz_out[31:0] <= fp_divide(x_coord, y_coord);
                     
                     // Y = 1.0 (fixed)
-                    xyz_out[1] <= FP_ONE;  // 1.0 in fixed point
+                    xyz_out[63:32] <= FP_ONE;  // 1.0 in fixed point
                     
                     // Z = ((1-x-y)/y) * 1.0
-                    xyz_out[2] <= fp_divide(FP_ONE - x_coord - y_coord, y_coord);
+                    xyz_out[95:64] <= fp_divide(FP_ONE - x_coord - y_coord, y_coord);
                     
                     state <= DONE;
                 end

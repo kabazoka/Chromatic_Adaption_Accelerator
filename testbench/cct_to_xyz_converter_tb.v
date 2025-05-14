@@ -35,7 +35,7 @@ module cct_to_xyz_converter_tb;
         begin
             fixed_to_float = fixed_point / 65536.0; // Q16.16 format
         end
-    endtask
+    endfunction
     
     // Stimulus
     initial begin

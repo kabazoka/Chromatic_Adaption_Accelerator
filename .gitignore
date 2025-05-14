@@ -1,3 +1,28 @@
 # Icarus Verilog simulation files
 *.vcd
 *.vvp
+
+# Quartus report files
+*.rpt
+*.summary
+*.smsg
+*.jdi
+*.pin
+*.sof
+*.done
+
+# Quartus database and incremental compilation files
+db/
+incremental_db/
+
+# Other potential generated files
+*.sld
+*.qws
+*.bak
+
+# ModelSim simulation files
+*.wlf
+*.vcd
+*.vst
+*.vstf
+simulation/modelsim/

@@ -48,6 +48,7 @@ module i2c_als_interface (
     reg scl_out;
     reg scl_oen;  // Output enable (active low)
     reg [31:0] wait_cnt;
+    reg [15:0] cct_counter;  // Counter for CCT simulation
     
     // I2C lines control
     assign i2c_sda = sda_oen ? 1'bz : sda_out;
@@ -84,6 +85,7 @@ module i2c_als_interface (
             cct_valid <= 1'b0;
             busy <= 1'b0;
             wait_cnt <= 32'd0;
+            cct_counter <= 16'd0;
         end else begin
             // Default signal values
             cct_valid <= 1'b0;
@@ -130,9 +132,9 @@ module i2c_als_interface (
 
                 // For this skeleton, we'll simulate getting CCT data
                 PROCESS_DATA: begin
-                    // Simulate calculating CCT from raw sensor data
-                    // In a real implementation, this would use the actual algorithm
-                    cct_out <= 5000 + {$random} % 3000;  // Random value between 5000K-8000K
+                    // Simplified CCT generation using a counter
+                    cct_out <= 5000 + (cct_counter % 3000);  // Value between 5000K-8000K
+                    cct_counter <= cct_counter + 16'd100;    // Increment counter
                     cct_valid <= 1'b1;
                     state <= WAIT_PERIOD;
                     wait_cnt <= 32'd0;

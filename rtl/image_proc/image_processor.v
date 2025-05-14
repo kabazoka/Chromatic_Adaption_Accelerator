@@ -7,9 +7,9 @@ module image_processor (
     input wire input_valid,             // Input data valid
     output reg input_ready,             // Ready to accept input
     
-    // Compensation matrix
-    input wire [31:0] comp_matrix [8:0], // 3x3 compensation matrix from Bradford
-    input wire matrix_valid,             // Matrix is valid
+    // Compensation matrix - changed from unpacked to packed format
+    input wire [287:0] comp_matrix,     // 3x3 compensation matrix from Bradford (flattened)
+    input wire matrix_valid,            // Matrix is valid
     
     // Output RGB data
     output reg [23:0] output_rgb,       // RGB output (8 bits per channel)
@@ -35,30 +35,59 @@ module image_processor (
     localparam OUTPUT = 3'd4;
     
     // sRGB to XYZ matrix (fixed-point Q16.16)
-    localparam [31:0] M_RGB_TO_XYZ [8:0] = '{
-        32'h00006587, 32'h00003430, 32'h00000F7C,  // 0.4124, 0.2126, 0.0193
-        32'h00002151, 32'h00007258, 32'h00001257,  // 0.3576, 0.7152, 0.1192
-        32'h00000332, 32'h00000977, 32'h0000E357   // 0.1805, 0.0722, 0.9505
-    };
+    parameter M_RGB_TO_XYZ_00 = 32'h00006587; // 0.4124
+    parameter M_RGB_TO_XYZ_01 = 32'h00003430; // 0.2126
+    parameter M_RGB_TO_XYZ_02 = 32'h00000F7C; // 0.0193
+    parameter M_RGB_TO_XYZ_10 = 32'h00002151; // 0.3576
+    parameter M_RGB_TO_XYZ_11 = 32'h00007258; // 0.7152
+    parameter M_RGB_TO_XYZ_12 = 32'h00001257; // 0.1192
+    parameter M_RGB_TO_XYZ_20 = 32'h00000332; // 0.1805
+    parameter M_RGB_TO_XYZ_21 = 32'h00000977; // 0.0722
+    parameter M_RGB_TO_XYZ_22 = 32'h0000E357; // 0.9505
     
     // XYZ to sRGB matrix (fixed-point Q16.16)
-    localparam [31:0] M_XYZ_TO_RGB [8:0] = '{
-        32'h00032085, 32'hFFFF0FCB, 32'hFFFFD80F,  // 3.2406, -1.5372, -0.4986
-        32'hFFFF9B33, 32'h0001E5CE, 32'h00000C3C,  // -0.9689, 1.8758, 0.0415
-        32'h00000830, 32'hFFFFAC0F, 32'h00010AF5   // 0.0557, -0.2040, 1.0570
-    };
+    parameter M_XYZ_TO_RGB_00 = 32'h00032085; // 3.2406
+    parameter M_XYZ_TO_RGB_01 = 32'hFFFF0FCB; // -1.5372
+    parameter M_XYZ_TO_RGB_02 = 32'hFFFFD80F; // -0.4986
+    parameter M_XYZ_TO_RGB_10 = 32'hFFFF9B33; // -0.9689
+    parameter M_XYZ_TO_RGB_11 = 32'h0001E5CE; // 1.8758
+    parameter M_XYZ_TO_RGB_12 = 32'h00000C3C; // 0.0415
+    parameter M_XYZ_TO_RGB_20 = 32'h00000830; // 0.0557
+    parameter M_XYZ_TO_RGB_21 = 32'hFFFFAC0F; // -0.2040
+    parameter M_XYZ_TO_RGB_22 = 32'h00010AF5; // 1.0570
     
     // Internal registers
     reg [2:0] state;
-    reg [7:0] r_in, g_in, b_in;           // Input RGB components
-    reg [(2-0)*(31-0+1)+(31-0):0] rgb_linear;          // Linear RGB values (gamma removed)
-    reg [(2-0)*(31-0+1)+(31-0):0] xyz_values;          // XYZ color space values
-    reg [(2-0)*(31-0+1)+(31-0):0] xyz_adapted;         // Adapted XYZ values
-    reg [(2-0)*(31-0+1)+(31-0):0] rgb_linear_out;      // Linear RGB after conversion back
-    reg [7:0] r_out, g_out, b_out;        // Output RGB components
+    reg [7:0] r_in, g_in, b_in;               // Input RGB components
     
-    // Temporary matrix calculation registers
-    reg [(2-0)*(31-0+1)+(31-0):0] temp_xyz;
+    // Replace unpacked arrays with packed arrays
+    reg [95:0] rgb_linear;                     // Linear RGB values (gamma removed)
+    reg [95:0] xyz_values;                     // XYZ color space values
+    reg [95:0] xyz_adapted;                    // Adapted XYZ values
+    reg [95:0] rgb_linear_out;                 // Linear RGB after conversion back
+    
+    reg [7:0] r_out, g_out, b_out;            // Output RGB components
+    
+    // For unpacking the matrix
+    wire [31:0] comp_mat_00, comp_mat_01, comp_mat_02;
+    wire [31:0] comp_mat_10, comp_mat_11, comp_mat_12;
+    wire [31:0] comp_mat_20, comp_mat_21, comp_mat_22;
+    
+    // Temporary working registers
+    reg [31:0] temp_val;
+    
+    integer i; // Loop counter
+    
+    // Unpack the compensation matrix
+    assign comp_mat_00 = comp_matrix[31:0];
+    assign comp_mat_01 = comp_matrix[63:32];
+    assign comp_mat_02 = comp_matrix[95:64];
+    assign comp_mat_10 = comp_matrix[127:96];
+    assign comp_mat_11 = comp_matrix[159:128];
+    assign comp_mat_12 = comp_matrix[191:160];
+    assign comp_mat_20 = comp_matrix[223:192];
+    assign comp_mat_21 = comp_matrix[255:224];
+    assign comp_mat_22 = comp_matrix[287:256];
     
     // Fixed-point arithmetic helper functions
     function [31:0] fp_multiply;
@@ -69,17 +98,15 @@ module image_processor (
             result = a * b;
             fp_multiply = result >> FRAC_BITS;
         end
-    endtask
+    endfunction
     
     // Gamma correction functions
     // sRGB gamma removal (approximate)
     function [31:0] gamma_remove;
         input [7:0] srgb_val;
         reg [31:0] linear;
-        real normalized;
         begin
-            // Convert 8-bit value to normalized range [0,1]
-            normalized = srgb_val / 255.0;
+            // Convert 8-bit value to normalized range [0,1] using fixed-point
             
             // Apply gamma removal
             // Simplified: if normalized < 0.04045 then normalized / 12.92
@@ -89,21 +116,20 @@ module image_processor (
             else begin
                 // Approximation using lookup and linear interpolation
                 // would be implemented here in actual hardware
-                // Simplified version:
+                // Simplified version: use squared value as approximation
                 linear = ((srgb_val * srgb_val) << (FRAC_BITS - 8)) / 255;
             end
             
             gamma_remove = linear;
         end
-    endtask
+    endfunction
     
     // Gamma application (approximate)
     function [7:0] gamma_apply;
         input [31:0] linear;
         reg [7:0] srgb_val;
-        real normalized;
         begin
-            // Simplified gamma application
+            // Simplified gamma application using fixed-point
             // In real implementation would use lookup + interpolation
             
             // Quick approximation: sqrt of value * 255
@@ -118,25 +144,90 @@ module image_processor (
                 
             gamma_apply = srgb_val;
         end
+    endfunction
+    
+    // Matrix-vector multiplication - updated to be compatible with ModelSim
+    function automatic [31:0] matrix_vector_multiply;
+        input [31:0] matrix_00, matrix_01, matrix_02, 
+                     matrix_10, matrix_11, matrix_12,
+                     matrix_20, matrix_21, matrix_22;
+        input [31:0] vec_0, vec_1, vec_2;
+        
+        // Using reg for output values instead of function output parameters
+        reg [31:0] result_0_value;
+        reg [31:0] result_1_value;
+        reg [31:0] result_2_value;
+        
+        begin
+            // Calculate results
+            result_0_value = fp_multiply(matrix_00, vec_0) + 
+                            fp_multiply(matrix_01, vec_1) + 
+                            fp_multiply(matrix_02, vec_2);
+                        
+            result_1_value = fp_multiply(matrix_10, vec_0) + 
+                            fp_multiply(matrix_11, vec_1) + 
+                            fp_multiply(matrix_12, vec_2);
+                        
+            result_2_value = fp_multiply(matrix_20, vec_0) + 
+                            fp_multiply(matrix_21, vec_1) + 
+                            fp_multiply(matrix_22, vec_2);
+                      
+            // Copy values to the external registers
+            xyz_values[31:0] = result_0_value;
+            xyz_values[63:32] = result_1_value;
+            xyz_values[95:64] = result_2_value;
+            
+            // Dummy return value
+            matrix_vector_multiply = 32'd0;
+        end
+    endfunction
+    
+    // Helper functions for matrix operations
+    task function_rgb_to_xyz;
+        begin
+            xyz_values[31:0] = fp_multiply(M_RGB_TO_XYZ_00, rgb_linear[31:0]) + 
+                              fp_multiply(M_RGB_TO_XYZ_01, rgb_linear[63:32]) + 
+                              fp_multiply(M_RGB_TO_XYZ_02, rgb_linear[95:64]);
+                        
+            xyz_values[63:32] = fp_multiply(M_RGB_TO_XYZ_10, rgb_linear[31:0]) + 
+                               fp_multiply(M_RGB_TO_XYZ_11, rgb_linear[63:32]) + 
+                               fp_multiply(M_RGB_TO_XYZ_12, rgb_linear[95:64]);
+                        
+            xyz_values[95:64] = fp_multiply(M_RGB_TO_XYZ_20, rgb_linear[31:0]) + 
+                               fp_multiply(M_RGB_TO_XYZ_21, rgb_linear[63:32]) + 
+                               fp_multiply(M_RGB_TO_XYZ_22, rgb_linear[95:64]);
+        end
     endtask
     
-    // Matrix-vector multiplication
-    task matrix_vector_multiply;
-        input [31:0] matrix [8:0];
-        input [31:0] vector [2:0];
-        output [31:0] result [2:0];
+    task function_apply_comp;
         begin
-            result[0] = fp_multiply(matrix[0], vector[0]) + 
-                        fp_multiply(matrix[1], vector[1]) + 
-                        fp_multiply(matrix[2], vector[2]);
+            xyz_adapted[31:0] = fp_multiply(comp_mat_00, xyz_values[31:0]) + 
+                               fp_multiply(comp_mat_01, xyz_values[63:32]) + 
+                               fp_multiply(comp_mat_02, xyz_values[95:64]);
                         
-            result[1] = fp_multiply(matrix[3], vector[0]) + 
-                        fp_multiply(matrix[4], vector[1]) + 
-                        fp_multiply(matrix[5], vector[2]);
+            xyz_adapted[63:32] = fp_multiply(comp_mat_10, xyz_values[31:0]) + 
+                                fp_multiply(comp_mat_11, xyz_values[63:32]) + 
+                                fp_multiply(comp_mat_12, xyz_values[95:64]);
                         
-            result[2] = fp_multiply(matrix[6], vector[0]) + 
-                        fp_multiply(matrix[7], vector[1]) + 
-                        fp_multiply(matrix[8], vector[2]);
+            xyz_adapted[95:64] = fp_multiply(comp_mat_20, xyz_values[31:0]) + 
+                                fp_multiply(comp_mat_21, xyz_values[63:32]) + 
+                                fp_multiply(comp_mat_22, xyz_values[95:64]);
+        end
+    endtask
+    
+    task function_xyz_to_rgb;
+        begin
+            rgb_linear_out[31:0] = fp_multiply(M_XYZ_TO_RGB_00, xyz_adapted[31:0]) + 
+                                   fp_multiply(M_XYZ_TO_RGB_01, xyz_adapted[63:32]) + 
+                                   fp_multiply(M_XYZ_TO_RGB_02, xyz_adapted[95:64]);
+                        
+            rgb_linear_out[63:32] = fp_multiply(M_XYZ_TO_RGB_10, xyz_adapted[31:0]) + 
+                                    fp_multiply(M_XYZ_TO_RGB_11, xyz_adapted[63:32]) + 
+                                    fp_multiply(M_XYZ_TO_RGB_12, xyz_adapted[95:64]);
+                        
+            rgb_linear_out[95:64] = fp_multiply(M_XYZ_TO_RGB_20, xyz_adapted[31:0]) + 
+                                    fp_multiply(M_XYZ_TO_RGB_21, xyz_adapted[63:32]) + 
+                                    fp_multiply(M_XYZ_TO_RGB_22, xyz_adapted[95:64]);
         end
     endtask
     
@@ -153,13 +244,10 @@ module image_processor (
             g_in <= 8'd0;
             b_in <= 8'd0;
             
-            integer i; initial i = 0; for (i = 0; i < 3; i++) begin
-                rgb_linear[i] <= 32'd0;
-                xyz_values[i] <= 32'd0;
-                xyz_adapted[i] <= 32'd0;
-                rgb_linear_out[i] <= 32'd0;
-                temp_xyz[i] <= 32'd0;
-            end
+            rgb_linear <= 96'd0;
+            xyz_values <= 96'd0;
+            xyz_adapted <= 96'd0;
+            rgb_linear_out <= 96'd0;
             
             r_out <= 8'd0;
             g_out <= 8'd0;
@@ -188,31 +276,31 @@ module image_processor (
                 
                 RGB_TO_XYZ: begin
                     // Remove gamma - convert sRGB to linear RGB
-                    rgb_linear[0] <= gamma_remove(r_in);
-                    rgb_linear[1] <= gamma_remove(g_in);
-                    rgb_linear[2] <= gamma_remove(b_in);
+                    rgb_linear[31:0] <= gamma_remove(r_in);
+                    rgb_linear[63:32] <= gamma_remove(g_in);
+                    rgb_linear[95:64] <= gamma_remove(b_in);
                     
-                    // Convert linear RGB to XYZ
-                    matrix_vector_multiply(M_RGB_TO_XYZ, rgb_linear, xyz_values);
+                    // Convert linear RGB to XYZ - special function for this case
+                    function_rgb_to_xyz;
                     
                     state <= APPLY_COMP;
                 end
                 
                 APPLY_COMP: begin
-                    // Apply chromatic adaptation matrix
-                    matrix_vector_multiply(comp_matrix, xyz_values, xyz_adapted);
+                    // Apply chromatic adaptation matrix - special function for this case
+                    function_apply_comp;
                     
                     state <= XYZ_TO_RGB;
                 end
                 
                 XYZ_TO_RGB: begin
-                    // Convert adapted XYZ back to linear RGB
-                    matrix_vector_multiply(M_XYZ_TO_RGB, xyz_adapted, rgb_linear_out);
+                    // Convert adapted XYZ back to linear RGB - special function for this case
+                    function_xyz_to_rgb;
                     
                     // Apply gamma to get sRGB
-                    r_out <= gamma_apply(rgb_linear_out[0]);
-                    g_out <= gamma_apply(rgb_linear_out[1]);
-                    b_out <= gamma_apply(rgb_linear_out[2]);
+                    r_out <= gamma_apply(rgb_linear_out[31:0]);
+                    g_out <= gamma_apply(rgb_linear_out[63:32]);
+                    b_out <= gamma_apply(rgb_linear_out[95:64]);
                     
                     state <= OUTPUT;
                 end

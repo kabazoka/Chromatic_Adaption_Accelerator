@@ -11,7 +11,7 @@ module image_processor_tb;
     reg [23:0] input_rgb;
     reg input_valid;
     wire input_ready;
-    reg [(8-0)*(31-0+1)+(31-0):0] comp_matrix;
+    reg [287:0] comp_matrix;  // Changed to packed array format (287:0)
     reg matrix_valid;
     wire [23:0] output_rgb;
     wire output_valid;
@@ -43,12 +43,12 @@ module image_processor_tb;
         begin
             fixed_to_float = fixed_point / 65536.0;
         end
-    endtask
+    endfunction
     
     // Function to display RGB in hex and decimal
     task display_rgb;
         input [23:0] rgb;
-        input reg [1023:0] label;
+        input [1023:0] label;
         begin
             $display("%s: #%06h (R=%d, G=%d, B=%d)", 
                      label, rgb, rgb[23:16], rgb[15:8], rgb[7:0]);
@@ -69,15 +69,15 @@ module image_processor_tb;
         
         // Initialize the compensation matrix to identity-like matrix
         // Identity matrix in Q16.16 fixed-point format
-        comp_matrix[0] = 32'h00010000; // 1.0
-        comp_matrix[1] = 32'h00000000; // 0.0
-        comp_matrix[2] = 32'h00000000; // 0.0
-        comp_matrix[3] = 32'h00000000; // 0.0
-        comp_matrix[4] = 32'h00010000; // 1.0
-        comp_matrix[5] = 32'h00000000; // 0.0
-        comp_matrix[6] = 32'h00000000; // 0.0
-        comp_matrix[7] = 32'h00000000; // 0.0
-        comp_matrix[8] = 32'h00010000; // 1.0
+        comp_matrix[31:0]     = 32'h00010000; // 1.0 (00)
+        comp_matrix[63:32]    = 32'h00000000; // 0.0 (01)
+        comp_matrix[95:64]    = 32'h00000000; // 0.0 (02)
+        comp_matrix[127:96]   = 32'h00000000; // 0.0 (10)
+        comp_matrix[159:128]  = 32'h00010000; // 1.0 (11)
+        comp_matrix[191:160]  = 32'h00000000; // 0.0 (12)
+        comp_matrix[223:192]  = 32'h00000000; // 0.0 (20)
+        comp_matrix[255:224]  = 32'h00000000; // 0.0 (21)
+        comp_matrix[287:256]  = 32'h00010000; // 1.0 (22)
         
         // Reset sequence
         #100;
@@ -131,15 +131,15 @@ module image_processor_tb;
         // Test 2: Non-identity transformation (simulating warm to cool light)
         $display("\nTest 2: Warm-to-cool compensation matrix");
         // This matrix would make the image cooler (more blue)
-        comp_matrix[0] = 32'h0000C000; // 0.75 (reduce red)
-        comp_matrix[1] = 32'h00000000; // 0.0
-        comp_matrix[2] = 32'h00000000; // 0.0
-        comp_matrix[3] = 32'h00000000; // 0.0
-        comp_matrix[4] = 32'h0000E000; // 0.875 (slightly reduce green)
-        comp_matrix[5] = 32'h00000000; // 0.0
-        comp_matrix[6] = 32'h00000000; // 0.0
-        comp_matrix[7] = 32'h00000000; // 0.0
-        comp_matrix[8] = 32'h00014000; // 1.25 (increase blue)
+        comp_matrix[31:0]     = 32'h0000C000; // 0.75 (reduce red)
+        comp_matrix[63:32]    = 32'h00000000; // 0.0
+        comp_matrix[95:64]    = 32'h00000000; // 0.0
+        comp_matrix[127:96]   = 32'h00000000; // 0.0
+        comp_matrix[159:128]  = 32'h0000E000; // 0.875 (slightly reduce green)
+        comp_matrix[191:160]  = 32'h00000000; // 0.0
+        comp_matrix[223:192]  = 32'h00000000; // 0.0
+        comp_matrix[255:224]  = 32'h00000000; // 0.0
+        comp_matrix[287:256]  = 32'h00014000; // 1.25 (increase blue)
         
         // Test with white
         wait(input_ready);
@@ -157,15 +157,15 @@ module image_processor_tb;
         // Test 3: Cool-to-warm transformation
         $display("\nTest 3: Cool-to-warm compensation matrix");
         // This matrix would make the image warmer (more red/yellow)
-        comp_matrix[0] = 32'h00014000; // 1.25 (increase red)
-        comp_matrix[1] = 32'h00000000; // 0.0
-        comp_matrix[2] = 32'h00000000; // 0.0
-        comp_matrix[3] = 32'h00000000; // 0.0
-        comp_matrix[4] = 32'h00011000; // 1.0625 (slightly increase green)
-        comp_matrix[5] = 32'h00000000; // 0.0
-        comp_matrix[6] = 32'h00000000; // 0.0
-        comp_matrix[7] = 32'h00000000; // 0.0
-        comp_matrix[8] = 32'h0000C000; // 0.75 (reduce blue)
+        comp_matrix[31:0]     = 32'h00014000; // 1.25 (increase red)
+        comp_matrix[63:32]    = 32'h00000000; // 0.0
+        comp_matrix[95:64]    = 32'h00000000; // 0.0
+        comp_matrix[127:96]   = 32'h00000000; // 0.0
+        comp_matrix[159:128]  = 32'h00011000; // 1.0625 (slightly increase green)
+        comp_matrix[191:160]  = 32'h00000000; // 0.0
+        comp_matrix[223:192]  = 32'h00000000; // 0.0
+        comp_matrix[255:224]  = 32'h00000000; // 0.0
+        comp_matrix[287:256]  = 32'h0000C000; // 0.75 (reduce blue)
         
         // Test with white
         wait(input_ready);
@@ -186,15 +186,18 @@ module image_processor_tb;
     end
     
     // Monitor status changes
+    reg busy_prev;
     always @(posedge clk) begin
         if (output_valid)
             $display("Time %0t: Output valid, RGB = #%06h", $time, output_rgb);
             
-        if (busy && !/* $past(busy) - Please handle manually */)
+        if (busy && !busy_prev)
             $display("Time %0t: Image processor BUSY", $time);
             
-        if (!busy && /* $past(busy) - Please handle manually */)
+        if (!busy && busy_prev)
             $display("Time %0t: Image processor IDLE", $time);
+            
+        busy_prev <= busy;
     end
 
 endmodule 

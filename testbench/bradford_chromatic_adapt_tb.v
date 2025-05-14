@@ -38,7 +38,7 @@ module bradford_chromatic_adapt_tb;
             // Convert Q16.16 to float
             fixed_to_float = fixed_point / 65536.0;
         end
-    endtask
+    endfunction
     
     // Stimulus
     initial begin
