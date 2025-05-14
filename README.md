@@ -1,106 +1,144 @@
 # Chromatic Adaptation Accelerator
 
-A Verilog implementation of a chromatic adaptation system for the Terasic DE2-115 FPGA board. This system uses an Ambient Light Sensor (ALS) to measure the environmental light color temperature and adjusts image colors to make them appear as if viewed under standard D65 (6500K) lighting.
+A Verilog implementation of a hardware chromatic adaptation system for the Terasic DE2-115 FPGA board. This system automatically adjusts display colors based on ambient lighting conditions to maintain color accuracy.
 
-## System Architecture
+## System Overview
 
-The system consists of the following major components:
+The Chromatic Adaptation Accelerator measures the color temperature of ambient light using an I²C ambient light sensor (ALS) and applies the Bradford chromatic adaptation transform to adjust colors, making them appear as if viewed under standard D65 (6500K) lighting.
 
-1. **I²C ALS Interface**: Communicates with an ambient light sensor to measure the current color temperature (CCT).
-2. **CCT-to-XYZ Conversion**: Converts the CCT value to XYZ color space.
-3. **Bradford Chromatic Adaptation**: Calculates the compensation matrix using the Bradford transform.
-4. **Image Processor**: Converts sRGB to XYZ, applies compensation, and converts back to sRGB.
-5. **Display Driver**: Interfaces with the display device.
-6. **Control Unit**: Orchestrates the overall operation of the system.
+## Features
+
+- Real-time ambient light color temperature measurement
+- Automatic white point adjustment using Bradford transform
+- Fixed-point implementation for efficient hardware usage
+- VGA display output with color correction
+- Simulation and testing framework for all system components
+- Full Quartus II FPGA implementation for DE2-115 board
+
+## Architecture
+
+The system is composed of six main modules:
+
+1. **I²C ALS Interface**: Communicates with the ambient light sensor to obtain CCT readings
+2. **CCT-to-XYZ Converter**: Transforms color temperature to XYZ color space coordinates
+3. **Bradford Chromatic Adaptation**: Calculates adaptation matrices using the Bradford method
+4. **Image Processor**: Applies color transformations to incoming RGB data
+5. **Display Driver**: Manages display timing and color output
+6. **Control Unit**: Orchestrates the overall system operation
 
 ## Directory Structure
 
 ```
 .
-├── rtl/                    # RTL source files
-│   ├── i2c/                # I2C interface for ALS sensor
+├── rtl/                    # RTL Verilog source files
+│   ├── chromatic_adaption_top.v  # Main system integration module
+│   ├── i2c/                # I2C interface modules
 │   ├── cct_xyz/            # CCT to XYZ conversion
-│   ├── chromatic_adapt/    # Bradford chromatic adaptation
-│   ├── image_proc/         # Image processing
+│   ├── chromatic_adapt/    # Bradford transform implementation
+│   ├── image_proc/         # Image processing pipeline
 │   ├── display_driver/     # Display interface
-│   └── control/            # Control unit
-├── src/                    # Top-level files
-├── testbench/              # Simulation testbench
-└── docs/                   # Documentation
+│   └── control/            # System control logic
+├── src/                    # FPGA-specific implementation
+│   └── chromatic_adaption_de2_115.v  # DE2-115 top-level wrapper
+├── testbench/              # Simulation testbenches
+├── simulation/             # Simulation output directory
+├── db/                     # Quartus database files
+├── incremental_db/         # Quartus incremental compilation files
+├── Makefile                # Make rules for simulation
+└── *.bat, *.tcl            # Build scripts for Quartus
 ```
-
-## Key Files
-
-- `rtl/chromatic_adaption_top.v`: Main system module that connects all components
-- `rtl/i2c/i2c_als_interface.v`: I²C interface to the ambient light sensor
-- `rtl/cct_xyz/cct_to_xyz_converter.v`: Converts CCT to XYZ color space
-- `rtl/chromatic_adapt/bradford_chromatic_adapt.v`: Bradford chromatic adaptation
-- `rtl/image_proc/image_processor.v`: Image processing pipeline
-- `rtl/display_driver/display_driver.v`: Display interface
-- `rtl/control/control_unit.v`: System control
-- `src/chromatic_adaption_de2_115.v`: Top-level wrapper for the DE2-115 board
-- `testbench/chromatic_adaption_tb.v`: Simulation testbench
-
-## Implementation Details
-
-### Color Space Conversion
-
-The system uses fixed-point arithmetic (Q16.16 format) for color space calculations, providing sufficient precision for color transformations while being efficient in hardware.
-
-### Bradford Chromatic Adaptation
-
-The Bradford transform is implemented as follows:
-
-1. Convert the ambient white point (from the ALS) to cone responses by multiplying with the Bradford matrix.
-2. Convert the reference white (D65) to cone responses using the same Bradford matrix.
-3. Calculate the diagonal scaling matrix D by dividing the reference cone responses by the ambient cone responses.
-4. Transform back to XYZ space using the inverse Bradford matrix.
-
-The resulting compensation matrix is applied to image data in the XYZ color space.
-
-### Fixed-Point Format
-
-All color transformations use the Q16.16 fixed-point format:
-
-- 16 bits for the integer part
-- 16 bits for the fractional part
-
-### I²C Interface
-
-The I²C interface is designed to work with standard ALS sensors that provide CCT measurements. The implementation supports the I²C Fast mode (400 kHz).
 
 ## Hardware Requirements
 
-- Terasic DE2-115 FPGA Development Board
-- Ambient Light Sensor with I²C interface
-- Display device (VGA or other suitable interface)
+- Terasic DE2-115 FPGA Development Board (Altera Cyclone IV E)
+- Ambient Light Sensor with I²C interface and CCT measurement
+- VGA display or monitor
 
-## Usage
+## Build Instructions
 
-1. Connect the ALS sensor to the I²C pins on the DE2-115 board.
-2. Connect a display to the appropriate output interface.
-3. Program the FPGA with the compiled bitstream.
-4. The system will automatically read the ambient light CCT and apply compensation to the display output.
+### FPGA Synthesis (Windows)
 
-## Status Indication
+To compile the project for the DE2-115 FPGA:
 
-The green LEDs on the DE2-115 board indicate the system status:
+```bash
+# Run the automated compilation script
+run_ca_compilation.bat
+```
 
-- LED[7]: ALS busy
-- LED[6]: CCT valid
-- LED[5]: XYZ valid
-- LED[4]: Matrix valid
-- LED[3]: Processing busy
-- LED[2]: Display busy
-- LED[1:0]: Current state
+This script:
+1. Creates/updates the Quartus project using create_ca_project.tcl
+2. Runs Analysis & Synthesis
+3. Performs Place & Route (Fitter)
+4. Generates the programming file
+5. Runs timing analysis
+6. Creates simulation files
 
-## Simulation
+### Simulation
 
-The testbench `chromatic_adaption_tb.v` can be used to simulate the system's operation. It provides test inputs and monitors the system's response.
+The project includes comprehensive testbenches for each module using Icarus Verilog:
 
-## Future Improvements
+```bash
+# Run a specific testbench
+make i2c           # I2C interface
+make cct_xyz       # CCT to XYZ converter
+make bradford      # Bradford adaptation
+make image_proc    # Image processor
+make display       # Display driver
+make control       # Control unit
+make top           # Top-level system
 
-- Support for more sophisticated CCT to xy conversion algorithms
-- Hardware acceleration for gamma correction
-- Support for different display interfaces
-- Integration with an image memory controller for full-frame processing
+# View waveforms
+make view_i2c      # and similarly for other modules
+
+# Run all testbenches
+make all
+
+# Clean generated files
+make clean
+```
+
+## Implementation Details
+
+### Fixed-Point Representation
+
+Color transformations use Q16.16 fixed-point format:
+- 16 bits for integer part
+- 16 bits for fractional part
+
+### Bradford Chromatic Adaptation Algorithm
+
+1. Convert source white point (from ALS) to cone responses using Bradford matrix
+2. Convert destination white point (D65) to cone responses
+3. Calculate scaling ratios between destination and source cone responses
+4. Transform back to XYZ using inverse Bradford transform
+5. Apply resulting matrix to input colors in XYZ space
+
+### I²C Protocol
+
+The ALS interface implements I²C Fast mode (400 kHz) to communicate with the ambient light sensor.
+
+### System Status Indication
+
+The green LEDs on the DE2-115 board show system status:
+- LED[7]: ALS sensor communication status
+- LED[6]: CCT reading validity
+- LED[5]: XYZ conversion status
+- LED[4]: Matrix calculation status
+- LED[3]: Image processing status
+- LED[2]: Display interface status
+- LED[1:0]: System state
+
+## Simulation and Testing
+
+Each module has a dedicated testbench in the `testbench/` directory. See `testbench/README.md` for detailed information on running and interpreting test results.
+
+## Performance Metrics
+
+The design targets the Altera Cyclone IV E FPGA on the DE2-115 board:
+- Operating frequency: 50 MHz
+- Resource utilization varies by module (see .rpt files for details)
+- Fixed-point precision allows accurate color transformations with efficient hardware usage
+
+## Contact
+
+For questions or contributions to this project, please open an issue or pull request on the repository.
