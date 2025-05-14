@@ -75,6 +75,8 @@ This script:
 
 ### Simulation
 
+#### Using Makefile (Linux/Mac/WSL)
+
 The project includes comprehensive testbenches for each module using Icarus Verilog:
 
 ```bash
@@ -96,6 +98,21 @@ make all
 # Clean generated files
 make clean
 ```
+
+#### Using Batch Script (Windows)
+
+For Windows users, simulation can also be run using the provided batch script:
+
+```bash
+# Run ModelSim simulation
+run_ca_simulation.bat
+```
+
+This script automatically:
+1. Sets up the ModelSim environment
+2. Compiles all RTL and testbench files
+3. Launches the ModelSim GUI with the specified testbench loaded
+4. Configures waveforms for viewing
 
 ## Implementation Details
 
