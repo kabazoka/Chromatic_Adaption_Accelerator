@@ -68,16 +68,17 @@ module image_processor_tb;
         matrix_valid = 0;
         
         // Initialize the compensation matrix to identity-like matrix
-        // Identity matrix in Q16.16 fixed-point format
-        comp_matrix[31:0]     = 32'h00010000; // 1.0 (00)
-        comp_matrix[63:32]    = 32'h00000000; // 0.0 (01)
-        comp_matrix[95:64]    = 32'h00000000; // 0.0 (02)
-        comp_matrix[127:96]   = 32'h00000000; // 0.0 (10)
-        comp_matrix[159:128]  = 32'h00010000; // 1.0 (11)
-        comp_matrix[191:160]  = 32'h00000000; // 0.0 (12)
-        comp_matrix[223:192]  = 32'h00000000; // 0.0 (20)
-        comp_matrix[255:224]  = 32'h00000000; // 0.0 (21)
-        comp_matrix[287:256]  = 32'h00010000; // 1.0 (22)
+        // True identity matrix for chromatic adaptation (3x3 matrix)
+        // Each row corresponds to how each XYZ channel should be transformed
+        comp_matrix[31:0]     = 32'h00010000; // 1.0 (0,0) - X contribution from X
+        comp_matrix[63:32]    = 32'h00000000; // 0.0 (0,1) - X contribution from Y
+        comp_matrix[95:64]    = 32'h00000000; // 0.0 (0,2) - X contribution from Z
+        comp_matrix[127:96]   = 32'h00000000; // 0.0 (1,0) - Y contribution from X
+        comp_matrix[159:128]  = 32'h00010000; // 1.0 (1,1) - Y contribution from Y
+        comp_matrix[191:160]  = 32'h00000000; // 0.0 (1,2) - Y contribution from Z
+        comp_matrix[223:192]  = 32'h00000000; // 0.0 (2,0) - Z contribution from X
+        comp_matrix[255:224]  = 32'h00000000; // 0.0 (2,1) - Z contribution from Y
+        comp_matrix[287:256]  = 32'h00010000; // 1.0 (2,2) - Z contribution from Z
         
         // Reset sequence
         #100;
@@ -85,11 +86,11 @@ module image_processor_tb;
         #100;
         
         // Test 1: Identity matrix, should produce same output as input
+        $display("\nTest 1: Identity matrix transformation (should preserve colors)");
         matrix_valid = 1;
         #20;
         
         // Test with pure red
-        $display("\nTest 1: Identity matrix transformation");
         wait(input_ready);
         input_rgb = 24'hFF0000; // Pure red
         input_valid = 1;
@@ -99,7 +100,7 @@ module image_processor_tb;
         // Wait for processing to complete
         wait(output_valid);
         display_rgb(input_rgb, "Input RGB (Red)");
-        display_rgb(output_rgb, "Output RGB");
+        display_rgb(output_rgb, "Output RGB (should be red)");
         #100;
         
         // Test with pure green
@@ -112,7 +113,7 @@ module image_processor_tb;
         // Wait for processing to complete
         wait(output_valid);
         display_rgb(input_rgb, "Input RGB (Green)");
-        display_rgb(output_rgb, "Output RGB");
+        display_rgb(output_rgb, "Output RGB (should be green)");
         #100;
         
         // Test with pure blue
@@ -125,21 +126,21 @@ module image_processor_tb;
         // Wait for processing to complete
         wait(output_valid);
         display_rgb(input_rgb, "Input RGB (Blue)");
-        display_rgb(output_rgb, "Output RGB");
+        display_rgb(output_rgb, "Output RGB (should be blue)");
         #100;
         
-        // Test 2: Non-identity transformation (simulating warm to cool light)
+        // Test 2: Warm-to-cool transformation (making colors cooler/more blue)
         $display("\nTest 2: Warm-to-cool compensation matrix");
-        // This matrix would make the image cooler (more blue)
-        comp_matrix[31:0]     = 32'h0000C000; // 0.75 (reduce red)
+        // Matrix for making colors cooler (more blue, less red/yellow)
+        comp_matrix[31:0]     = 32'h0000CCCC; // 0.8 (reduce red)
         comp_matrix[63:32]    = 32'h00000000; // 0.0
         comp_matrix[95:64]    = 32'h00000000; // 0.0
         comp_matrix[127:96]   = 32'h00000000; // 0.0
-        comp_matrix[159:128]  = 32'h0000E000; // 0.875 (slightly reduce green)
+        comp_matrix[159:128]  = 32'h0000E666; // 0.9 (slightly reduce green)
         comp_matrix[191:160]  = 32'h00000000; // 0.0
         comp_matrix[223:192]  = 32'h00000000; // 0.0
         comp_matrix[255:224]  = 32'h00000000; // 0.0
-        comp_matrix[287:256]  = 32'h00014000; // 1.25 (increase blue)
+        comp_matrix[287:256]  = 32'h00013333; // 1.2 (boost blue)
         
         // Test with white
         wait(input_ready);
@@ -151,21 +152,25 @@ module image_processor_tb;
         // Wait for processing to complete
         wait(output_valid);
         display_rgb(input_rgb, "Input RGB (White)");
-        display_rgb(output_rgb, "Output RGB (should be cooler/more blue)");
+        display_rgb(output_rgb, "Output RGB (should be cooler/more blue - expected: #B4C8FF)");
+        if (output_rgb == 24'hB4C8FF)
+            $display("✓ TEST 2 PASSED: Output matches expected cooler/blue tint (#B4C8FF)");
+        else
+            $display("✗ TEST 2 FAILED: Output (#%06h) does not match expected (#B4C8FF)", output_rgb);
         #100;
         
         // Test 3: Cool-to-warm transformation
         $display("\nTest 3: Cool-to-warm compensation matrix");
-        // This matrix would make the image warmer (more red/yellow)
-        comp_matrix[31:0]     = 32'h00014000; // 1.25 (increase red)
+        // Matrix for making colors warmer (more red/yellow, less blue)
+        comp_matrix[31:0]     = 32'h00013333; // 1.2 (boost red)
         comp_matrix[63:32]    = 32'h00000000; // 0.0
         comp_matrix[95:64]    = 32'h00000000; // 0.0
         comp_matrix[127:96]   = 32'h00000000; // 0.0
-        comp_matrix[159:128]  = 32'h00011000; // 1.0625 (slightly increase green)
+        comp_matrix[159:128]  = 32'h00011999; // 1.1 (slightly boost green)
         comp_matrix[191:160]  = 32'h00000000; // 0.0
         comp_matrix[223:192]  = 32'h00000000; // 0.0
         comp_matrix[255:224]  = 32'h00000000; // 0.0
-        comp_matrix[287:256]  = 32'h0000C000; // 0.75 (reduce blue)
+        comp_matrix[287:256]  = 32'h0000CCCC; // 0.8 (reduce blue)
         
         // Test with white
         wait(input_ready);
@@ -177,7 +182,11 @@ module image_processor_tb;
         // Wait for processing to complete
         wait(output_valid);
         display_rgb(input_rgb, "Input RGB (White)");
-        display_rgb(output_rgb, "Output RGB (should be warmer/more red)");
+        display_rgb(output_rgb, "Output RGB (should be warmer/more red - expected: #FFBE8C)");
+        if (output_rgb == 24'hFFBE8C)
+            $display("✓ TEST 3 PASSED: Output matches expected warmer/red tint (#FFBE8C)");
+        else
+            $display("✗ TEST 3 FAILED: Output (#%06h) does not match expected (#FFBE8C)", output_rgb);
         #100;
         
         // End simulation

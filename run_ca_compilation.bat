@@ -64,7 +64,7 @@ set /p launch_modelsim=
 if /i "%launch_modelsim%"=="Y" (
     echo Launching ModelSim...
     cd simulation/modelsim
-    vsim -t 1ps -L altera_ver -L lpm_ver -L sgate_ver -L altera_mf_ver -L cycloneive_ver -L rtl_work -L work -voptargs="+acc" image_processor_tb
+    vsim -t 1ps -L altera_ver -L lpm_ver -L sgate_ver -L altera_mf_ver -L cycloneive_ver -L work -voptargs="+acc" work.image_processor_tb -do "add wave -position insertpoint sim:/image_processor_tb/*; run -all"
 ) else (
     echo Exiting without launching ModelSim.
 )
