@@ -33,26 +33,26 @@ module bradford_chromatic_adapt (
     
     // Bradford transformation matrix (fixed-point Q16.16)
     // This is the linear RGB to LMS matrix for the Bradford transform
-    parameter M_BRAD_00 = 32'h0005A8F6; // 0.8951
-    parameter M_BRAD_01 = 32'hFFFF76F5; // -0.7502
-    parameter M_BRAD_02 = 32'hFFFFDFE5; // -0.1380
-    parameter M_BRAD_10 = 32'h00003C29; // 0.2664
-    parameter M_BRAD_11 = 32'h000193CD; // 1.7135
-    parameter M_BRAD_12 = 32'hFFFFD27F; // -0.0415
-    parameter M_BRAD_20 = 32'hFFFFF56F; // -0.1614
-    parameter M_BRAD_21 = 32'h00000C8F; // 0.0367
-    parameter M_BRAD_22 = 32'h00017D3F; // 1.1082
+    parameter M_BRAD_00 = 32'h0000E505; // 0.8951
+    parameter M_BRAD_01 = 32'hFFFF3F7C; // -0.7502
+    parameter M_BRAD_02 = 32'hFFFFDC29; // -0.1380
+    parameter M_BRAD_10 = 32'h00000444; // 0.2664
+    parameter M_BRAD_11 = 32'h00017751; // 1.7135
+    parameter M_BRAD_12 = 32'hFFFFF548; // -0.0415
+    parameter M_BRAD_20 = 32'hFFFFD70A; // -0.1614
+    parameter M_BRAD_21 = 32'h00000962; // 0.0367
+    parameter M_BRAD_22 = 32'h00011C29; // 1.1082
     
     // Inverse Bradford transformation matrix (fixed-point Q16.16)
-    parameter M_BRAD_INV_00 = 32'h00018973; // 0.9869
-    parameter M_BRAD_INV_01 = 32'h00007DAF; // 0.4898
-    parameter M_BRAD_INV_02 = 32'h00002366; // 0.1368
-    parameter M_BRAD_INV_10 = 32'h00008A77; // 0.5403
-    parameter M_BRAD_INV_11 = 32'h0000A5EB; // 0.6499
-    parameter M_BRAD_INV_12 = 32'hFFFFDBB3; // -0.0967
-    parameter M_BRAD_INV_20 = 32'h00003C9A; // 0.0060
-    parameter M_BRAD_INV_21 = 32'hFFFFCE00; // -0.1976
-    parameter M_BRAD_INV_22 = 32'h0000E79C; // 0.9054
+    parameter M_BRAD_INV_00 = 32'h0000FC8F; // 0.9869
+    parameter M_BRAD_INV_01 = 32'h00007D70; // 0.4898
+    parameter M_BRAD_INV_02 = 32'h0000228F; // 0.1368
+    parameter M_BRAD_INV_10 = 32'h00008A33; // 0.5403
+    parameter M_BRAD_INV_11 = 32'h0000A63D; // 0.6499
+    parameter M_BRAD_INV_12 = 32'hFFFFE6E1; // -0.0967
+    parameter M_BRAD_INV_20 = 32'h0000009E; // 0.0060
+    parameter M_BRAD_INV_21 = 32'hFFFFCD70; // -0.1976
+    parameter M_BRAD_INV_22 = 32'h0000E7D7; // 0.9054
     
     // Internal registers
     reg [2:0] state;
@@ -80,7 +80,7 @@ module bradford_chromatic_adapt (
         reg [63:0] result;
         begin
             result = a * b;
-            fp_multiply = result >> FRAC_BITS;
+            fp_multiply = result[47:16]; // Extract appropriate bits for Q16.16
         end
     endfunction
     
@@ -89,8 +89,33 @@ module bradford_chromatic_adapt (
         input [31:0] b;
         reg [63:0] result;
         begin
-            result = (a << FRAC_BITS) / b;
+            // Check for division by zero or very small values
+            if ((b == 0) || (b < 32'h00000010)) // Avoid division by very small values
+                result = (a[31] == b[31]) ? 64'h7FFFFFFFFFFFFFFF : 64'h8000000000000000; // Max or min value based on sign
+            else begin
+                result = (a << FRAC_BITS) / b;
+                // Saturate result if it overflows 32 bits
+                if (result > 64'h00000000FFFFFFFF)
+                    result = 64'h00000000FFFFFFFF;
+                else if (result < 64'hFFFFFFFF00000000)
+                    result = 64'hFFFFFFFF00000000;
+            end
             fp_divide = result[31:0];
+        end
+    endfunction
+    
+    // Saturation function to ensure values stay within valid range
+    function [31:0] saturate;
+        input [31:0] value;
+        input [31:0] min_val;
+        input [31:0] max_val;
+        begin
+            if (value < min_val)
+                saturate = min_val;
+            else if (value > max_val)
+                saturate = max_val;
+            else
+                saturate = value;
         end
     endfunction
     
@@ -98,34 +123,48 @@ module bradford_chromatic_adapt (
     task matrix_vector_multiply_amb;
         begin
             // Convert ambient XYZ to cone responses using Bradford matrix
-            amb_cone_resp[31:0] = fp_multiply(M_BRAD_00, amb_x) + 
-                                 fp_multiply(M_BRAD_01, amb_y) + 
-                                 fp_multiply(M_BRAD_02, amb_z);
+            // Use saturation to prevent overflow/underflow
+            amb_cone_resp[31:0] = saturate(
+                                    fp_multiply(M_BRAD_00, amb_x) + 
+                                    fp_multiply(M_BRAD_01, amb_y) + 
+                                    fp_multiply(M_BRAD_02, amb_z),
+                                    32'h80000000, 32'h7FFFFFFF);
                         
-            amb_cone_resp[63:32] = fp_multiply(M_BRAD_10, amb_x) + 
-                                  fp_multiply(M_BRAD_11, amb_y) + 
-                                  fp_multiply(M_BRAD_12, amb_z);
+            amb_cone_resp[63:32] = saturate(
+                                    fp_multiply(M_BRAD_10, amb_x) + 
+                                    fp_multiply(M_BRAD_11, amb_y) + 
+                                    fp_multiply(M_BRAD_12, amb_z),
+                                    32'h80000000, 32'h7FFFFFFF);
                         
-            amb_cone_resp[95:64] = fp_multiply(M_BRAD_20, amb_x) + 
-                                  fp_multiply(M_BRAD_21, amb_y) + 
-                                  fp_multiply(M_BRAD_22, amb_z);
+            amb_cone_resp[95:64] = saturate(
+                                    fp_multiply(M_BRAD_20, amb_x) + 
+                                    fp_multiply(M_BRAD_21, amb_y) + 
+                                    fp_multiply(M_BRAD_22, amb_z),
+                                    32'h80000000, 32'h7FFFFFFF);
         end
     endtask
     
     task matrix_vector_multiply_ref;
         begin
             // Convert reference XYZ to cone responses using Bradford matrix
-            ref_cone_resp[31:0] = fp_multiply(M_BRAD_00, ref_xyz[31:0]) + 
-                                 fp_multiply(M_BRAD_01, ref_xyz[63:32]) + 
-                                 fp_multiply(M_BRAD_02, ref_xyz[95:64]);
+            // Use saturation to prevent overflow/underflow
+            ref_cone_resp[31:0] = saturate(
+                                    fp_multiply(M_BRAD_00, ref_xyz[31:0]) + 
+                                    fp_multiply(M_BRAD_01, ref_xyz[63:32]) + 
+                                    fp_multiply(M_BRAD_02, ref_xyz[95:64]),
+                                    32'h80000000, 32'h7FFFFFFF);
                         
-            ref_cone_resp[63:32] = fp_multiply(M_BRAD_10, ref_xyz[31:0]) + 
-                                  fp_multiply(M_BRAD_11, ref_xyz[63:32]) + 
-                                  fp_multiply(M_BRAD_12, ref_xyz[95:64]);
+            ref_cone_resp[63:32] = saturate(
+                                    fp_multiply(M_BRAD_10, ref_xyz[31:0]) + 
+                                    fp_multiply(M_BRAD_11, ref_xyz[63:32]) + 
+                                    fp_multiply(M_BRAD_12, ref_xyz[95:64]),
+                                    32'h80000000, 32'h7FFFFFFF);
                         
-            ref_cone_resp[95:64] = fp_multiply(M_BRAD_20, ref_xyz[31:0]) + 
-                                  fp_multiply(M_BRAD_21, ref_xyz[63:32]) + 
-                                  fp_multiply(M_BRAD_22, ref_xyz[95:64]);
+            ref_cone_resp[95:64] = saturate(
+                                    fp_multiply(M_BRAD_20, ref_xyz[31:0]) + 
+                                    fp_multiply(M_BRAD_21, ref_xyz[63:32]) + 
+                                    fp_multiply(M_BRAD_22, ref_xyz[95:64]),
+                                    32'h80000000, 32'h7FFFFFFF);
         end
     endtask
     
@@ -133,6 +172,7 @@ module bradford_chromatic_adapt (
         begin
             // Calculate diagonal scaling matrix D
             // D = diag(Ref_LMS / Amb_LMS)
+            // Use division function that handles potential issues
             diag_scale[31:0] = fp_divide(ref_cone_resp[31:0], amb_cone_resp[31:0]);
             diag_scale[63:32] = fp_divide(ref_cone_resp[63:32], amb_cone_resp[63:32]);
             diag_scale[95:64] = fp_divide(ref_cone_resp[95:64], amb_cone_resp[95:64]);
@@ -168,43 +208,61 @@ module bradford_chromatic_adapt (
             
             // Then M_BRADFORD_INV * (D * M_BRADFORD)
             // Row 1
-            r00 = fp_multiply(M_BRAD_INV_00, temp_result[31:0]) + 
+            r00 = saturate(
+                  fp_multiply(M_BRAD_INV_00, temp_result[31:0]) + 
                   fp_multiply(M_BRAD_INV_01, temp_result[127:96]) + 
-                  fp_multiply(M_BRAD_INV_02, temp_result[223:192]);
+                  fp_multiply(M_BRAD_INV_02, temp_result[223:192]),
+                  32'h80000000, 32'h7FFFFFFF);
                   
-            r01 = fp_multiply(M_BRAD_INV_00, temp_result[63:32]) + 
+            r01 = saturate(
+                  fp_multiply(M_BRAD_INV_00, temp_result[63:32]) + 
                   fp_multiply(M_BRAD_INV_01, temp_result[159:128]) + 
-                  fp_multiply(M_BRAD_INV_02, temp_result[255:224]);
+                  fp_multiply(M_BRAD_INV_02, temp_result[255:224]),
+                  32'h80000000, 32'h7FFFFFFF);
                   
-            r02 = fp_multiply(M_BRAD_INV_00, temp_result[95:64]) + 
+            r02 = saturate(
+                  fp_multiply(M_BRAD_INV_00, temp_result[95:64]) + 
                   fp_multiply(M_BRAD_INV_01, temp_result[191:160]) + 
-                  fp_multiply(M_BRAD_INV_02, temp_result[287:256]);
+                  fp_multiply(M_BRAD_INV_02, temp_result[287:256]),
+                  32'h80000000, 32'h7FFFFFFF);
                   
             // Row 2
-            r10 = fp_multiply(M_BRAD_INV_10, temp_result[31:0]) + 
+            r10 = saturate(
+                  fp_multiply(M_BRAD_INV_10, temp_result[31:0]) + 
                   fp_multiply(M_BRAD_INV_11, temp_result[127:96]) + 
-                  fp_multiply(M_BRAD_INV_12, temp_result[223:192]);
+                  fp_multiply(M_BRAD_INV_12, temp_result[223:192]),
+                  32'h80000000, 32'h7FFFFFFF);
                   
-            r11 = fp_multiply(M_BRAD_INV_10, temp_result[63:32]) + 
+            r11 = saturate(
+                  fp_multiply(M_BRAD_INV_10, temp_result[63:32]) + 
                   fp_multiply(M_BRAD_INV_11, temp_result[159:128]) + 
-                  fp_multiply(M_BRAD_INV_12, temp_result[255:224]);
+                  fp_multiply(M_BRAD_INV_12, temp_result[255:224]),
+                  32'h80000000, 32'h7FFFFFFF);
                   
-            r12 = fp_multiply(M_BRAD_INV_10, temp_result[95:64]) + 
+            r12 = saturate(
+                  fp_multiply(M_BRAD_INV_10, temp_result[95:64]) + 
                   fp_multiply(M_BRAD_INV_11, temp_result[191:160]) + 
-                  fp_multiply(M_BRAD_INV_12, temp_result[287:256]);
+                  fp_multiply(M_BRAD_INV_12, temp_result[287:256]),
+                  32'h80000000, 32'h7FFFFFFF);
                   
             // Row 3
-            r20 = fp_multiply(M_BRAD_INV_20, temp_result[31:0]) + 
+            r20 = saturate(
+                  fp_multiply(M_BRAD_INV_20, temp_result[31:0]) + 
                   fp_multiply(M_BRAD_INV_21, temp_result[127:96]) + 
-                  fp_multiply(M_BRAD_INV_22, temp_result[223:192]);
+                  fp_multiply(M_BRAD_INV_22, temp_result[223:192]),
+                  32'h80000000, 32'h7FFFFFFF);
                   
-            r21 = fp_multiply(M_BRAD_INV_20, temp_result[63:32]) + 
+            r21 = saturate(
+                  fp_multiply(M_BRAD_INV_20, temp_result[63:32]) + 
                   fp_multiply(M_BRAD_INV_21, temp_result[159:128]) + 
-                  fp_multiply(M_BRAD_INV_22, temp_result[255:224]);
+                  fp_multiply(M_BRAD_INV_22, temp_result[255:224]),
+                  32'h80000000, 32'h7FFFFFFF);
                   
-            r22 = fp_multiply(M_BRAD_INV_20, temp_result[95:64]) + 
+            r22 = saturate(
+                  fp_multiply(M_BRAD_INV_20, temp_result[95:64]) + 
                   fp_multiply(M_BRAD_INV_21, temp_result[191:160]) + 
-                  fp_multiply(M_BRAD_INV_22, temp_result[287:256]);
+                  fp_multiply(M_BRAD_INV_22, temp_result[287:256]),
+                  32'h80000000, 32'h7FFFFFFF);
                   
             // Flatten the matrix for output
             comp_matrix[31:0]     = r00;
@@ -249,10 +307,10 @@ module bradford_chromatic_adapt (
                     // For simplicity, use D65 white point (x=0.3127, y=0.3290, Y=1.0)
                     // Convert to XYZ: X = (x/y)*Y, Z = ((1-x-y)/y)*Y
                     
-                    // Hardcoded D65 white point in fixed-point
-                    ref_xyz[31:0] <= 32'h0000F852; // X = 0.95047 in Q16.16
+                    // Hardcoded D65 white point in fixed-point - corrected values
+                    ref_xyz[31:0] <= 32'h0000F333; // X = 0.95047 in Q16.16
                     ref_xyz[63:32] <= FP_ONE;      // Y = 1.0 in Q16.16
-                    ref_xyz[95:64] <= 32'h00010721; // Z = 1.08883 in Q16.16
+                    ref_xyz[95:64] <= 32'h00011666; // Z = 1.08883 in Q16.16
                     
                     state <= CALC_BRADFORD_AMB;
                 end
