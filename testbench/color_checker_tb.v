@@ -21,10 +21,10 @@ module color_checker_tb;
     integer i, j;
     integer timeout_counter;
 
-    // Color checker array - 4x4 image (RGB values)
-    reg [23:0] color_checker[0:15];
-    reg [23:0] output_pixels[0:15];
-    reg [3:0] pixel_counter;
+    // Color checker array - 6x4 image (RGB values) - 24 patches
+    reg [23:0] color_checker[0:23];
+    reg [23:0] output_pixels[0:23];
+    reg [4:0] pixel_counter;
 
     // Instantiate the Unit Under Test (UUT)
     image_processor uut (
@@ -51,16 +51,16 @@ module color_checker_tb;
         input [23:0] rgb;
         input integer idx;
         begin
-            $display("Pixel %2d: #%06h (R=%3d, G=%3d, B=%3d)", 
+            $display("Patch %2d: #%06h (R=%3d, G=%3d, B=%3d)", 
                      idx, rgb, rgb[23:16], rgb[15:8], rgb[7:0]);
-            $fwrite(output_file, "Pixel %2d: #%06h (R=%3d, G=%3d, B=%3d)\n", 
+            $fwrite(output_file, "Patch %2d: #%06h (R=%3d, G=%3d, B=%3d)\n", 
                     idx, rgb, rgb[23:16], rgb[15:8], rgb[7:0]);
         end
     endtask
 
     // Task to process a single pixel with timeout
     task process_pixel;
-        input [3:0] pixel_idx;
+        input [4:0] pixel_idx;
         begin
             // Try to wait for ready with timeout
             timeout_counter = 0;
@@ -116,27 +116,35 @@ module color_checker_tb;
         matrix_valid = 0;
         pixel_counter = 0;
 
-        // Initialize 4x4 color checker
+        // Initialize Color Checker Classic patches
         // Row 1
-        color_checker[0]  = 24'hFF0000; // Red
-        color_checker[1]  = 24'h00FF00; // Green
-        color_checker[2]  = 24'h0000FF; // Blue
-        color_checker[3]  = 24'hFFFF00; // Yellow
+        color_checker[0]  = 24'h735244; // Dark Skin (115, 82, 68)
+        color_checker[1]  = 24'hC29682; // Light Skin (194, 150, 130)
+        color_checker[2]  = 24'h627A9D; // Blue Sky (98, 122, 157)
+        color_checker[3]  = 24'h576C43; // Foliage (87, 108, 67)
+        color_checker[4]  = 24'h8580B1; // Blue Flower (133, 128, 177)
+        color_checker[5]  = 24'h67BDAA; // Bluish Green (103, 189, 170)
         // Row 2
-        color_checker[4]  = 24'h00FFFF; // Cyan
-        color_checker[5]  = 24'hFF00FF; // Magenta
-        color_checker[6]  = 24'h808080; // Gray
-        color_checker[7]  = 24'hFFFFFF; // White
+        color_checker[6]  = 24'hD67E2C; // Orange (214, 126, 44)
+        color_checker[7]  = 24'h505BA6; // Purplish Blue (80, 91, 166)
+        color_checker[8]  = 24'hC15A63; // Moderate Red (193, 90, 99)
+        color_checker[9]  = 24'h5E3C6C; // Purple (94, 60, 108)
+        color_checker[10] = 24'h9DBC40; // Yellow Green (157, 188, 64)
+        color_checker[11] = 24'hE0A32E; // Orange Yellow (224, 163, 46)
         // Row 3
-        color_checker[8]  = 24'hA52A2A; // Brown
-        color_checker[9]  = 24'h008000; // Dark Green
-        color_checker[10] = 24'h000080; // Navy Blue
-        color_checker[11] = 24'hFFA500; // Orange
+        color_checker[12] = 24'h383D96; // Blue (56, 61, 150)
+        color_checker[13] = 24'h469449; // Green (70, 148, 73)
+        color_checker[14] = 24'hAF363C; // Red (175, 54, 60)
+        color_checker[15] = 24'hE7C71F; // Yellow (231, 199, 31)
+        color_checker[16] = 24'hBB5695; // Magenta (187, 86, 149)
+        color_checker[17] = 24'h0885A1; // Cyan (8, 133, 161)
         // Row 4
-        color_checker[12] = 24'hFFC0CB; // Pink
-        color_checker[13] = 24'h800080; // Purple
-        color_checker[14] = 24'h008080; // Teal
-        color_checker[15] = 24'hD2B48C; // Tan
+        color_checker[18] = 24'hF3F3F2; // White (243, 243, 242)
+        color_checker[19] = 24'hC8C8C8; // Neutral 8 (200, 200, 200)
+        color_checker[20] = 24'hA0A0A0; // Neutral 6.5 (160, 160, 160)
+        color_checker[21] = 24'h7A7A79; // Neutral 5 (122, 122, 121)
+        color_checker[22] = 24'h555555; // Neutral 3.5 (85, 85, 85)
+        color_checker[23] = 24'h343434; // Black (52, 52, 52)
 
         // Initialize compensation matrix for a cool-to-warm transformation
         // Identity matrix with slight warm tint
@@ -159,32 +167,32 @@ module color_checker_tb;
         matrix_valid = 1;
         #20;
 
-        $fwrite(output_file, "==== Original Color Checker Values ====\n");
-        for (i = 0; i < 16; i = i + 1) begin
+        $fwrite(output_file, "==== Original Color Checker Classic Values ====\n");
+        for (i = 0; i < 24; i = i + 1) begin
             display_rgb(color_checker[i], i);
         end
 
         $fwrite(output_file, "\n==== Chromatically Adapted Values ====\n");
 
         // Process all pixels using the more robust method
-        for (i = 0; i < 16; i = i + 1) begin
+        for (i = 0; i < 24; i = i + 1) begin
             process_pixel(i);
         end
 
         // Create output PPM file
         ppm_file = $fopen("color_checker_output.ppm", "w");
         $fwrite(ppm_file, "P3\n");
-        $fwrite(ppm_file, "# Chromatically adapted 4x4 color checker\n");
-        $fwrite(ppm_file, "4 4\n");
+        $fwrite(ppm_file, "# Chromatically adapted 6x4 color checker\n");
+        $fwrite(ppm_file, "6 4\n");
         $fwrite(ppm_file, "255\n");
 
-        // Write pixel data in PPM format (4 pixels per row)
+        // Write pixel data in PPM format (6 pixels per row)
         for (i = 0; i < 4; i = i + 1) begin
-            for (j = 0; j < 4; j = j + 1) begin
+            for (j = 0; j < 6; j = j + 1) begin
                 $fwrite(ppm_file, "%d %d %d ", 
-                        output_pixels[i*4+j][23:16], 
-                        output_pixels[i*4+j][15:8], 
-                        output_pixels[i*4+j][7:0]);
+                        output_pixels[i*6+j][23:16], 
+                        output_pixels[i*6+j][15:8], 
+                        output_pixels[i*6+j][7:0]);
             end
             $fwrite(ppm_file, "\n");
         end
@@ -192,17 +200,17 @@ module color_checker_tb;
         // Also create input PPM for reference
         ppm_file = $fopen("color_checker_input.ppm", "w");
         $fwrite(ppm_file, "P3\n");
-        $fwrite(ppm_file, "# Original 4x4 color checker\n");
-        $fwrite(ppm_file, "4 4\n");
+        $fwrite(ppm_file, "# Original 6x4 color checker classic\n");
+        $fwrite(ppm_file, "6 4\n");
         $fwrite(ppm_file, "255\n");
 
-        // Write original pixel data in PPM format (4 pixels per row)
+        // Write original pixel data in PPM format (6 pixels per row)
         for (i = 0; i < 4; i = i + 1) begin
-            for (j = 0; j < 4; j = j + 1) begin
+            for (j = 0; j < 6; j = j + 1) begin
                 $fwrite(ppm_file, "%d %d %d ", 
-                        color_checker[i*4+j][23:16], 
-                        color_checker[i*4+j][15:8], 
-                        color_checker[i*4+j][7:0]);
+                        color_checker[i*6+j][23:16], 
+                        color_checker[i*6+j][15:8], 
+                        color_checker[i*6+j][7:0]);
             end
             $fwrite(ppm_file, "\n");
         end

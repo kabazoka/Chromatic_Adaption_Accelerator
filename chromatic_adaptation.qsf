@@ -18,7 +18,7 @@
 #
 # Quartus II 64-Bit
 # Version 13.0.1 Build 232 06/12/2013 Service Pack 1 SJ Web Edition
-# Date created = 21:52:58  May 16, 2025
+# Date created = 21:27:54  May 17, 2025
 #
 # -------------------------------------------------------------------------- #
 #
@@ -40,7 +40,7 @@ set_global_assignment -name FAMILY "Cyclone IV E"
 set_global_assignment -name DEVICE EP4CE115F29C7
 set_global_assignment -name TOP_LEVEL_ENTITY chromatic_adaption_de2_115
 set_global_assignment -name ORIGINAL_QUARTUS_VERSION "13.0 SP1"
-set_global_assignment -name PROJECT_CREATION_TIME_DATE "21:52:58  MAY 16, 2025"
+set_global_assignment -name PROJECT_CREATION_TIME_DATE "21:27:54  MAY 17, 2025"
 set_global_assignment -name LAST_QUARTUS_VERSION "13.0 SP1"
 set_global_assignment -name VERILOG_INPUT_VERSION SYSTEMVERILOG_2005
 set_global_assignment -name VERILOG_FILE rtl/cct_xyz/cct_to_xyz_converter.v
@@ -54,6 +54,7 @@ set_global_assignment -name VERILOG_FILE src/chromatic_adaption_de2_115.v
 set_global_assignment -name VERILOG_FILE testbench/bradford_chromatic_adapt_tb.v
 set_global_assignment -name VERILOG_FILE testbench/cct_to_xyz_converter_tb.v
 set_global_assignment -name VERILOG_FILE testbench/chromatic_adaption_tb.v
+set_global_assignment -name VERILOG_FILE testbench/color_checker_tb.v
 set_global_assignment -name VERILOG_FILE testbench/control_unit_tb.v
 set_global_assignment -name VERILOG_FILE testbench/display_driver_tb.v
 set_global_assignment -name VERILOG_FILE testbench/i2c_als_interface_tb.v
@@ -66,3 +67,7 @@ set_global_assignment -name EDA_TEST_BENCH_NAME image_processor_tb -section_id e
 set_global_assignment -name EDA_DESIGN_INSTANCE_NAME NA -section_id image_processor_tb
 set_global_assignment -name EDA_TEST_BENCH_MODULE_NAME image_processor_tb -section_id image_processor_tb
 set_global_assignment -name EDA_TEST_BENCH_FILE testbench/image_processor_tb.v -section_id image_processor_tb
+set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
+set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
+set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
+set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

@@ -116,23 +116,35 @@ This script automatically:
 
 #### Color Checker Simulation (Windows)
 
-To visualize the effect of chromatic adaptation on a 4x4 color checker pattern:
+To run the chromatic adaptation simulation:
 
 ```bash
-# Run the color checker simulation
-run_color_checker_sim.bat
+# Run the chromatic adaptation simulation menu
+run_ca_sim.bat
 ```
 
-This script performs the following:
-1. Sets up a ModelSim work environment
-2. Creates a 4x4 color checker input pattern
-3. Runs the simulation in console mode (no GUI)
-4. Generates the following output files in the `simulation/modelsim` directory:
-   - `color_checker_input.ppm`: Original color pattern (PPM format)
-   - `color_checker_output.ppm`: Chromatically adapted colors (PPM format)
-   - `color_checker_input.png`: Original color pattern (PNG format)
-   - `color_checker_output.png`: Chromatically adapted colors (PNG format)
-   - `color_checker_output.txt`: Detailed pixel information before and after adaptation
+This script provides an interactive menu with the following options:
+1. Color Checker Classic (6x4) - Simulates adaptation on standard color checker
+2. Custom PNG Image (768x512) - Process your own PNG image
+3. Exit
+
+**Color Checker Classic Simulation:**
+- Creates a 6x4 color checker input pattern
+- Runs the simulation in console mode (no GUI)
+- Generates output files in the `simulation/modelsim` directory:
+  - `color_checker_input.ppm`: Original color pattern (PPM format)
+  - `color_checker_output.ppm`: Chromatically adapted colors (PPM format)
+  - `color_checker_input.png`: Original color pattern (PNG format)
+  - `color_checker_output.png`: Chromatically adapted colors (PNG format)
+  - `color_checker_output.txt`: Detailed patch information before and after adaptation
+
+**Custom PNG Image Simulation:**
+- Allows processing of user-provided 768x512 PNG images
+- Converts the PNG to PPM for processing
+- Generates output files in the `simulation/modelsim` directory:
+  - `input_image.ppm`: Original image (PPM format)
+  - `output_image.ppm`: Chromatically adapted image (PPM format)
+  - `output_image.png`: Chromatically adapted image (PNG format)
 
 The simulation applies a warm-tinting adaptation matrix that:
 - Boosts red component (1.1×)
@@ -141,7 +153,7 @@ The simulation applies a warm-tinting adaptation matrix that:
 
 **Prerequisites**: 
 - ModelSim must be installed and in your PATH
-- Python with the Pillow library (`pip install pillow`) for PPM to PNG conversion
+- Python with the Pillow library (`pip install pillow`) for PNG/PPM conversions
 
 ## Implementation Details
 
