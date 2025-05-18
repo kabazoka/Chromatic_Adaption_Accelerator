@@ -106,32 +106,127 @@ echo Simulation completed successfully!
 goto end_test
 
 :pyfail
-echo Error converting PPM to PNG – check Pillow installation.
+echo Error converting PPM to PNG - check Pillow installation.
 goto end_test
 
 :end_test
 cd ../../
-goto menu
+:end
 
-rem ==================== Custom-Image Process ====================
 :get_cct_custom_image
 echo.
-set /p cct_value="Enter CCT value [6500]: "
-if "%cct_value%"=="" set cct_value=6500
+echo ====================================================================
+echo Running Custom PNG Image Simulation
+echo ====================================================================
 
-rem …(Flow is the same as before, just replace all "python …" with "%PYTHON_BIN%" …)…
+echo.
+echo Setting up ModelSim work library...
+if not exist "simulation\modelsim" mkdir simulation\modelsim
+cd simulation\modelsim
 
-rem Example: PNG→PPM
-"%PYTHON_BIN%" png_to_ppm.py %png_file% input_image.ppm || goto pyfail_img
+echo.
+echo 1. Creating ModelSim work library...
+if exist work rmdir /s /q work
+vlib work
+if %ERRORLEVEL% NEQ 0 (
+    echo Failed to create work library.
+    goto error
+)
 
-rem Example: PPM→PNG
-"%PYTHON_BIN%" ppm_to_png.py output_image.ppm output_image.png || goto pyfail_img
+echo.
+echo 2. Mapping logical library to physical location...
+vmap work work
+if %ERRORLEVEL% NEQ 0 (
+    echo Failed to map work library.
+    goto error
+)
 
-goto end_image_test
+echo.
+echo 3. Copy PNG to PPM converter script...
+copy /Y ..\..\python\png_to_ppm.py .
+if %ERRORLEVEL% NEQ 0 (
+    echo Failed to copy PNG to PPM converter.
+    goto error
+)
 
-:pyfail_img
-echo Error converting images – check Pillow installation.
-goto end_image_test
+echo.
+echo 4. Select PNG image to process (768x512)...
+echo Please place your PNG image in the simulation\modelsim directory.
+set /p png_file="Enter PNG filename (e.g., image.png): "
+
+if not exist "%png_file%" (
+    echo Error: File '%png_file%' not found.
+    cd ../../
+    goto menu
+)
+
+echo.
+echo 5. Converting PNG to PPM format...
+rem 5. Converting PNG to PPM format...
+"%PYTHON_BIN%" png_to_ppm.py "%png_file%" input_image.ppm  || goto pyfail
+
+
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo Error converting PNG to PPM. Make sure you have Python and PIL installed.
+    echo You can install PIL with: pip install pillow
+    goto end_image_test
+)
+
+echo.
+echo 6. Copying testbench file...
+copy /Y ..\..\testbench\image_tb.v .
+if %ERRORLEVEL% NEQ 0 (
+    echo Failed to copy testbench file.
+    goto error
+)
+
+echo.
+echo 7. Compiling image_processor and testbench...
+vlog -work work "../../rtl/image_proc/image_processor.v"          || goto error
+vlog -work work "../../rtl/cct_xyz/cct_to_xyz_converter.v"        || goto error
+vlog -work work "../../rtl/chromatic_adapt/bradford_chromatic_adapt.v" || goto error
+vlog -work work "./image_tb.v"                            || goto error
+
+echo.
+echo 8. Launching ModelSim simulation in console mode...
+echo This may take some time for a 768x512 image...
+vsim -c -t 1ps -L work -voptargs="+acc" work.image_tb -do "run -all; quit -f"
+
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo Error launching ModelSim simulation.
+    goto error
+)
+
+echo.
+rem 9. Copying PPM to PNG conversion script...
+copy /Y ..\..\python\ppm_to_png.py .  || goto error
+
+rem 10. Converting output PPM to PNG...
+"%PYTHON_BIN%" ppm_to_png.py output_image.ppm output_image.png  || goto pyfail
+
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo Error converting PPM to PNG. Make sure you have Python and PIL installed.
+    echo You can install PIL with: pip install pillow
+    goto end_image_test
+)
+
+echo.
+echo ====================================================================
+echo Custom Image Simulation completed successfully!
+echo ====================================================================
+echo Output files in simulation\modelsim:
+echo  - input_image.ppm: Original image in PPM format
+echo  - output_image.ppm: Chromatically adapted image in PPM format
+echo  - output_image.png: Chromatically adapted image in PNG format
+echo ====================================================================
+
+
+:end_image_test
+cd ../../
+goto end
 
 rem ==================== Other sections remain unchanged ====================
 :ask_path

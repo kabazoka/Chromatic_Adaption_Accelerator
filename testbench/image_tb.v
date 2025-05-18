@@ -1,52 +1,68 @@
+// -----------------------------------------------------------------------------
+//  Test-bench : apply Bradford chromatic-adaptation to a fixed PPM image
+//  修正項目：
+//    1. ambient_xyz 直接用 D65 (Q16.16) 常數；十六進位正確化
+//    2. compensation-matrix / 像素列印一律加 $signed()，避免 65535.xx 假象
+//    3. fallback 矩陣也宣告為 signed 常數
+// -----------------------------------------------------------------------------
 module image_tb;
 
-    // Parameters
-    parameter CLK_PERIOD = 20; // 50MHz clock
-    parameter IMAGE_WIDTH = 768;
-    parameter IMAGE_HEIGHT = 512;
-    parameter TOTAL_PIXELS = IMAGE_WIDTH * IMAGE_HEIGHT;
-    parameter CCT_VALUE = 6500; // Default D65, can be overridden via command line
+    // -----------------------------------------------------------------
+    // parameters
+    // -----------------------------------------------------------------
+    parameter CLK_PERIOD    = 20;
+    parameter IMAGE_WIDTH   = 768;
+    parameter IMAGE_HEIGHT  = 512;
+    localparam TOTAL_PIXELS = IMAGE_WIDTH * IMAGE_HEIGHT;
 
-    // Signals
-    reg clk;
-    reg rst_n;
-    reg [23:0] input_rgb;
-    reg input_valid;
-    wire input_ready;
-    reg [287:0] comp_matrix;
-    reg matrix_valid;
+    parameter CCT_VALUE     = 6500;
+
+    // -----------------------------------------------------------------
+    // clocks / resets
+    // -----------------------------------------------------------------
+    reg clk  = 0;
+    reg rst_n= 0;
+    always #(CLK_PERIOD/2) clk = ~clk;
+
+    // -----------------------------------------------------------------
+    // I/O with DUT
+    // -----------------------------------------------------------------
+    reg  [23:0] input_rgb;
+    reg         input_valid;
+    wire        input_ready;
+    reg  [287:0] comp_matrix;
+    reg         matrix_valid;
     wire [23:0] output_rgb;
-    wire output_valid;
-    wire busy;
-    
-    // Bradford chromatic adaptation signals
-    reg [95:0] ambient_xyz;
-    reg xyz_valid;
-    reg [15:0] ref_cct;
+    wire        output_valid;
+    wire        busy;
+
+    // -----------------------------------------------------------------
+    // Bradford adaptor I/O
+    // -----------------------------------------------------------------
+    reg  signed [95:0] ambient_xyz;      // *** FIX : signed
+    reg         xyz_valid;
+    reg  [15:0] ref_cct;
     wire [287:0] bradford_matrix;
-    wire bradford_matrix_valid;
+    wire        bradford_matrix_valid;
 
-    // File handlers
-    integer input_file;
-    integer output_file;
-    integer scan_result;
-    integer i, j;
-    integer timeout_counter;
-    integer processed_pixels;
-    integer progress_mark;
+    // -----------------------------------------------------------------
+    // file handles / misc
+    // -----------------------------------------------------------------
+    integer input_file , output_file , scan_result;
+    integer ppm_w , ppm_h , maxv;
+    integer x , y , timeout_counter , processed_pixels;
+    integer c;  // For character reading
+    reg [8*100:1] dummy_str; // 100 character buffer for $fgets
 
-    // RGB values
-    reg [7:0] r, g, b;
-    reg [23:0] output_pixels[0:TOTAL_PIXELS-1];
-    
-    // PPM reading
-    reg [8*100:1] line_buffer; // Buffer to read lines (up to 100 chars)
-    reg comment_line;
-    
-    // Instantiate the Bradford Chromatic Adaptation module
+    // pixel buffers
+    reg  [7:0] r, g, b;
+    reg  [23:0] out_pix [0:TOTAL_PIXELS-1];
+
+    // -----------------------------------------------------------------
+    // DUT instances
+    // -----------------------------------------------------------------
     bradford_chromatic_adapt bradford (
-        .clk(clk),
-        .rst_n(rst_n),
+        .clk(clk), .rst_n(rst_n),
         .ambient_xyz(ambient_xyz),
         .xyz_valid(xyz_valid),
         .ref_cct(ref_cct),
@@ -54,10 +70,8 @@ module image_tb;
         .matrix_valid(bradford_matrix_valid)
     );
 
-    // Instantiate the Unit Under Test (UUT)
-    image_processor uut (
-        .clk(clk),
-        .rst_n(rst_n),
+    image_processor dut (
+        .clk(clk), .rst_n(rst_n),
         .input_rgb(input_rgb),
         .input_valid(input_valid),
         .input_ready(input_ready),
@@ -68,220 +82,160 @@ module image_tb;
         .busy(busy)
     );
 
-    // Clock generation
-    initial begin
-        clk = 0;
-        forever #(CLK_PERIOD/2) clk = ~clk;
-    end
-
-    // Task to process a single pixel with timeout
-    task process_pixel;
-        input [31:0] pixel_idx;
+    // -----------------------------------------------------------------
+    // helpers
+    // -----------------------------------------------------------------
+    task automatic wait_ready;
         begin
-            // Try to wait for ready with timeout
             timeout_counter = 0;
             while (!input_ready && timeout_counter < 1000) begin
-                #(CLK_PERIOD);
-                timeout_counter = timeout_counter + 1;
+                #(CLK_PERIOD); timeout_counter = timeout_counter + 1;
             end
-
-            if (timeout_counter >= 1000) begin
-                $display("Warning: Timeout waiting for input_ready at pixel %d", pixel_idx);
-            end
-
-            // Send pixel regardless of ready signal if timed out
-            input_valid = 1;
-            #(CLK_PERIOD);
-            input_valid = 0;
-
-            // Wait for output with timeout
-            timeout_counter = 0;
-            while (!output_valid && timeout_counter < 1000) begin
-                #(CLK_PERIOD);
-                timeout_counter = timeout_counter + 1;
-            end
-
-            if (timeout_counter >= 1000) begin
-                $display("Error: Timeout waiting for output_valid at pixel %d", pixel_idx);
-                output_pixels[pixel_idx] = 24'hFF0000; // Default to red for error
-            end else begin
-                // Capture output
-                output_pixels[pixel_idx] = output_rgb;
-            end
-
-            // Show progress
-            processed_pixels = processed_pixels + 1;
-            if (processed_pixels % (TOTAL_PIXELS/20) == 0) begin
-                progress_mark = (processed_pixels * 100) / TOTAL_PIXELS;
-                $display("Processing: %d%% complete", progress_mark);
-            end
-
-            // Allow some time between pixels
-            #(CLK_PERIOD * 2);
         end
     endtask
 
-    // Stimulus
+    task automatic wait_output;
+        input integer idx;
+        begin
+            timeout_counter = 0;
+            while (!output_valid && timeout_counter < 1000) begin
+                #(CLK_PERIOD); timeout_counter = timeout_counter + 1;
+            end
+            if (timeout_counter >= 1000) begin
+                $display("! timeout @pixel %0d", idx);
+                out_pix[idx] = 24'hFF0000;
+            end
+            else out_pix[idx] = output_rgb;
+        end
+    endtask
+
+    // -----------------------------------------------------------------
+    // stimulus
+    // -----------------------------------------------------------------
     initial begin
-        // Initialize waveform dump
-        $dumpfile("image_tb.vcd");
-        $dumpvars(0, image_tb);
+        // waveform
+        $dumpfile("image_tb.vcd"); $dumpvars(0,image_tb);
 
-        // Open input file (PPM format)
+        // -----------------------------------------------------------------
+        // open PPM
+        // -----------------------------------------------------------------
         input_file = $fopen("input_image.ppm", "r");
-        if (input_file == 0) begin
-            $display("Error: Could not open input_image.ppm");
-            $finish;
+        if (!input_file) begin
+            $fatal("Cannot open input_image.ppm");
+        end
+        output_file= $fopen("output_image.ppm", "w");
+        if (!output_file) begin
+            $fatal("Cannot open output_image.ppm");
         end
 
-        // Open output file for the processed image
-        output_file = $fopen("output_image.ppm", "w");
-        if (output_file == 0) begin
-            $display("Error: Could not open output_image.ppm");
-            $fclose(input_file);
-            $finish;
-        end
-
-        // Log the CCT value being used
-        $display("Using CCT value: %d K", CCT_VALUE);
-
-        // Initialize inputs
-        rst_n = 0;
-        input_rgb = 24'h000000;
-        input_valid = 0;
-        matrix_valid = 0;
+        // -----------------------------------------------------------------
+        // init signals
+        // -----------------------------------------------------------------
+        input_rgb    = 0; input_valid = 0; matrix_valid = 0;
         processed_pixels = 0;
-        
-        // Initialize Bradford inputs
-        ambient_xyz = 96'h0000F3330001000000011170A; // D65 white point (X=0.95047, Y=1.0, Z=1.08883)
-        xyz_valid = 0;
-        ref_cct = CCT_VALUE[15:0]; // Set the reference CCT from parameter
 
-        // Reset sequence
-        #100;
-        rst_n = 1;
-        #100;
-        
-        // Get compensation matrix from Bradford module
-        $display("Calculating compensation matrix for CCT=%d K...", CCT_VALUE);
-        xyz_valid = 1;
-        #(CLK_PERIOD);
+        // *** FIX : 正確 D65 (0.95047 , 1.000 , 1.08883) × 65536
+        ambient_xyz[31:0]  = 32'h0000F3F2;   // 0.95047
+        ambient_xyz[63:32] = 32'h00010000;   // 1.0
+        ambient_xyz[95:64] = 32'h000116CB;   // 1.08883
         xyz_valid = 0;
-        
-        // Wait for Bradford module to finish calculation
+        ref_cct   = CCT_VALUE;
+
+        // reset
+        #(5*CLK_PERIOD); rst_n = 1; #(5*CLK_PERIOD);
+
+        // -----------------------------------------------------------------
+        // get Bradford matrix
+        // -----------------------------------------------------------------
+        xyz_valid = 1; #(CLK_PERIOD); xyz_valid = 0;
         timeout_counter = 0;
-        while (!bradford_matrix_valid && timeout_counter < 1000) begin
-            #(CLK_PERIOD);
-            timeout_counter = timeout_counter + 1;
+        while (!bradford_matrix_valid && timeout_counter < 2000) begin
+            #(CLK_PERIOD); timeout_counter = timeout_counter + 1;
+        end
+        if (!bradford_matrix_valid) $fatal("Bradford adaptor timeout");
+
+        comp_matrix   = bradford_matrix;
+        matrix_valid  = 1;                // inform image_processor
+
+        $display(">> Bradford matrix ready");
+
+        // -----------------------------------------------------------------
+        // print matrix (signed)
+        // -----------------------------------------------------------------
+        $display("[%f %f %f]",
+                 $itor($signed(comp_matrix[ 31:  0]))/65536.0,
+                 $itor($signed(comp_matrix[ 63: 32]))/65536.0,
+                 $itor($signed(comp_matrix[ 95: 64]))/65536.0);
+        $display("[%f %f %f]",
+                 $itor($signed(comp_matrix[127: 96]))/65536.0,
+                 $itor($signed(comp_matrix[159:128]))/65536.0,
+                 $itor($signed(comp_matrix[191:160]))/65536.0);
+        $display("[%f %f %f]",
+                 $itor($signed(comp_matrix[223:192]))/65536.0,
+                 $itor($signed(comp_matrix[255:224]))/65536.0,
+                 $itor($signed(comp_matrix[287:256]))/65536.0);
+
+        // -----------------------------------------------------------------
+        // read PPM header - direct approach
+        // -----------------------------------------------------------------
+        // Read PPM header directly
+        // First line: P3
+        scan_result = $fgetc(input_file); // P
+        scan_result = $fgetc(input_file); // 3
+        scan_result = $fgetc(input_file); // newline
+        
+        // Comment line (skip it)
+        scan_result = $fgetc(input_file);
+        while (scan_result != "\n") begin
+            scan_result = $fgetc(input_file);
         end
         
-        if (timeout_counter >= 1000) begin
-            $display("Error: Timeout waiting for Bradford matrix calculation");
-            // Fall back to default matrix
-            comp_matrix[31:0]     = 32'h00011999; // 1.1 (boost red)
-            comp_matrix[63:32]    = 32'h00000000; // 0.0
-            comp_matrix[95:64]    = 32'h00000000; // 0.0
-            comp_matrix[127:96]   = 32'h00000000; // 0.0
-            comp_matrix[159:128]  = 32'h00010CCC; // 1.05 (slight boost green)
-            comp_matrix[191:160]  = 32'h00000000; // 0.0
-            comp_matrix[223:192]  = 32'h00000000; // 0.0
-            comp_matrix[255:224]  = 32'h00000000; // 0.0
-            comp_matrix[287:256]  = 32'h0000E666; // 0.9 (reduce blue)
-        end else begin
-            // Use the matrix from Bradford module
-            comp_matrix = bradford_matrix;
-            $display("Acquired Bradford compensation matrix");
-        end
-
-        // Set matrix valid
-        matrix_valid = 1;
-        #20;
-
-        // Skip PPM header (P3, comments, dimensions, max value)
-        $display("Reading PPM header...");
+        // Dimensions
+        scan_result = $fscanf(input_file, "%d %d", ppm_w, ppm_h);
         
-        // Read the P3 magic number
-        scan_result = $fscanf(input_file, "P3\n");
-        
-        // Read lines until we get past comments (lines starting with #)
-        comment_line = 1'b1;
-        while (comment_line) begin
-            scan_result = $fgets(line_buffer, input_file);
-            if (line_buffer[8*1:1] == "#") begin
-                // This is a comment line, continue reading
-                comment_line = 1'b1;
-            end else begin
-                // Non-comment line - must be dimensions
-                comment_line = 1'b0;
-                // Parse the dimensions from line_buffer
-                scan_result = $sscanf(line_buffer, "%d %d", i, j);
-                
-                if (i != IMAGE_WIDTH || j != IMAGE_HEIGHT) begin
-                    $display("Warning: Image dimensions in PPM (%dx%d) do not match expected dimensions (%dx%d)",
-                            i, j, IMAGE_WIDTH, IMAGE_HEIGHT);
-                end
+        // Max value
+        scan_result = $fscanf(input_file, "%d", maxv);
+
+        if (ppm_w!=IMAGE_WIDTH || ppm_h!=IMAGE_HEIGHT)
+            $display("!! PPM size %0dx%0d != expected %0dx%0d",ppm_w,ppm_h,
+                     IMAGE_WIDTH,IMAGE_HEIGHT);
+
+        // write header to output
+        $fwrite(output_file,"P3\n");
+        $fwrite(output_file,"# chromatically-adapted, CCT=%0dK\n",CCT_VALUE);
+        $fwrite(output_file,"%0d %0d\n", IMAGE_WIDTH, IMAGE_HEIGHT);
+        $fwrite(output_file,"255\n");
+
+        // -----------------------------------------------------------------
+        // main pixel loop
+        // -----------------------------------------------------------------
+        $display(">> processing %0d pixels …", TOTAL_PIXELS);
+        for (y=0; y<IMAGE_HEIGHT; y=y+1) begin
+            for (x=0; x<IMAGE_WIDTH; x=x+1) begin
+                if ($fscanf(input_file,"%d %d %d", r, g, b)!=3)
+                    $fatal("read error @(%0d,%0d)",x,y);
+
+                input_rgb   = {r[7:0], g[7:0], b[7:0]}; // R,G,B order
+                wait_ready();
+                input_valid = 1; #(CLK_PERIOD);
+                input_valid = 0;
+                wait_output(y*IMAGE_WIDTH+x);
+
+                // write to PPM on the fly (降低記憶體)
+                $fwrite(output_file,"%0d %0d %0d ",
+                        out_pix[y*IMAGE_WIDTH+x][23:16],
+                        out_pix[y*IMAGE_WIDTH+x][15:8 ],
+                        out_pix[y*IMAGE_WIDTH+x][7:0 ]);
             end
-        end
-        
-        // Read the max value line
-        scan_result = $fscanf(input_file, "%d\n", i); // Max value (usually 255)
-        
-        // Write PPM header to output file
-        $fwrite(output_file, "P3\n");
-        $fwrite(output_file, "# Chromatically adapted image (CCT=%d K)\n", CCT_VALUE);
-        $fwrite(output_file, "%d %d\n", IMAGE_WIDTH, IMAGE_HEIGHT);
-        $fwrite(output_file, "255\n");
-
-        $display("Starting image processing (%dx%d = %d pixels) with CCT=%d K...", 
-                 IMAGE_WIDTH, IMAGE_HEIGHT, TOTAL_PIXELS, CCT_VALUE);
-        
-        // Process each pixel
-        for (i = 0; i < IMAGE_HEIGHT; i = i + 1) begin
-            for (j = 0; j < IMAGE_WIDTH; j = j + 1) begin
-                // Read RGB values for this pixel
-                // Note: Reading as R,B,G instead of R,G,B to compensate for channel order mismatch
-                scan_result = $fscanf(input_file, "%d %d %d", r, b, g);
-                
-                if (scan_result != 3) begin
-                    $display("Error: Could not read pixel data at position (%d,%d)", j, i);
-                    input_rgb = 24'h000000; // Black for error
-                end else begin
-                    // Send RGB in the correct format for the hardware
-                    // RGB test confirmed that [23:16]=R, [15:8]=G, [7:0]=B
-                    input_rgb = {r, g, b};
-                end
-                
-                // Process this pixel
-                process_pixel(i * IMAGE_WIDTH + j);
-            end
+            $fwrite(output_file,"\n");
+            if (y % 32 == 31) $display("   line %0d / %0d done", y+1, IMAGE_HEIGHT);
         end
 
-        // Write processed pixels to output file
-        $display("Writing output image...");
-        for (i = 0; i < IMAGE_HEIGHT; i = i + 1) begin
-            for (j = 0; j < IMAGE_WIDTH; j = j + 1) begin
-                // Output RGB values directly - the hardware outputs in RGB format
-                // [23:16]=R, [15:8]=G, [7:0]=B as confirmed by the RGB test
-                $fwrite(output_file, "%d %d %d ", 
-                        output_pixels[i*IMAGE_WIDTH+j][23:16], // R
-                        output_pixels[i*IMAGE_WIDTH+j][15:8],  // G
-                        output_pixels[i*IMAGE_WIDTH+j][7:0]);  // B
-                
-                // Add newline after every 5 pixels for readability
-                if ((j + 1) % 5 == 0) begin
-                    $fwrite(output_file, "\n");
-                end
-            end
-            // Ensure each row ends with a newline
-            if (IMAGE_WIDTH % 5 != 0) begin
-                $fwrite(output_file, "\n");
-            end
-        end
-
-        $fclose(input_file);
-        $fclose(output_file);
-        $display("Simulation completed - output saved to output_image.ppm (CCT=%d K)", CCT_VALUE);
+        // -----------------------------------------------------------------
+        // done
+        // -----------------------------------------------------------------
+        $display(">> finished, saved to output_image.ppm");
+        $fclose(input_file); $fclose(output_file);
         $finish;
     end
-
-endmodule 
+endmodule

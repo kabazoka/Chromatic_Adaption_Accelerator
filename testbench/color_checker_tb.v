@@ -116,17 +116,17 @@ module color_checker_tb;
                 // Debug: Print matrix values each time
                 $fwrite(output_file, "Compensation Matrix:\n");
                 $fwrite(output_file, "  [%f, %f, %f]\n", 
-                        $itor(comp_matrix[31:0]) / 65536.0,
-                        $itor(comp_matrix[63:32]) / 65536.0,
-                        $itor(comp_matrix[95:64]) / 65536.0);
+                        $itor($signed(comp_matrix[31:0])) / 65536.0,
+                        $itor($signed(comp_matrix[63:32])) / 65536.0,
+                        $itor($signed(comp_matrix[95:64])) / 65536.0);
                 $fwrite(output_file, "  [%f, %f, %f]\n", 
-                        $itor(comp_matrix[127:96]) / 65536.0,
-                        $itor(comp_matrix[159:128]) / 65536.0,
-                        $itor(comp_matrix[191:160]) / 65536.0);
+                        $itor($signed(comp_matrix[127:96])) / 65536.0,
+                        $itor($signed(comp_matrix[159:128])) / 65536.0,
+                        $itor($signed(comp_matrix[191:160])) / 65536.0);
                 $fwrite(output_file, "  [%f, %f, %f]\n", 
-                        $itor(comp_matrix[223:192]) / 65536.0,
-                        $itor(comp_matrix[255:224]) / 65536.0,
-                        $itor(comp_matrix[287:256]) / 65536.0);
+                        $itor($signed(comp_matrix[223:192])) / 65536.0,
+                        $itor($signed(comp_matrix[255:224])) / 65536.0,
+                        $itor($signed(comp_matrix[287:256])) / 65536.0);
             end
 
             // Allow some time between pixels
@@ -233,32 +233,32 @@ module color_checker_tb;
         // Debug output of matrix values (in floating point for readability)
         $display("Bradford Compensation Matrix:");
         $display("  [%f, %f, %f]", 
-                 $itor(bradford_matrix[31:0]) / 65536.0,
-                 $itor(bradford_matrix[63:32]) / 65536.0,
-                 $itor(bradford_matrix[95:64]) / 65536.0);
+                 $itor($signed(bradford_matrix[31:0])) / 65536.0,
+                 $itor($signed(bradford_matrix[63:32])) / 65536.0,
+                 $itor($signed(bradford_matrix[95:64])) / 65536.0);
         $display("  [%f, %f, %f]", 
-                 $itor(bradford_matrix[127:96]) / 65536.0,
-                 $itor(bradford_matrix[159:128]) / 65536.0,
-                 $itor(bradford_matrix[191:160]) / 65536.0);
+                 $itor($signed(bradford_matrix[127:96])) / 65536.0,
+                 $itor($signed(bradford_matrix[159:128])) / 65536.0,
+                 $itor($signed(bradford_matrix[191:160])) / 65536.0);
         $display("  [%f, %f, %f]", 
-                 $itor(bradford_matrix[223:192]) / 65536.0,
-                 $itor(bradford_matrix[255:224]) / 65536.0,
-                 $itor(bradford_matrix[287:256]) / 65536.0);
+                 $itor($signed(bradford_matrix[223:192])) / 65536.0,
+                 $itor($signed(bradford_matrix[255:224])) / 65536.0,
+                 $itor($signed(bradford_matrix[287:256])) / 65536.0);
                  
         // Write matrix to output file
         $fwrite(output_file, "Compensation Matrix:\n");
         $fwrite(output_file, "  [%f, %f, %f]\n", 
-                $itor(bradford_matrix[31:0]) / 65536.0,
-                $itor(bradford_matrix[63:32]) / 65536.0,
-                $itor(bradford_matrix[95:64]) / 65536.0);
+                $itor($signed(bradford_matrix[31:0])) / 65536.0, 
+                $itor($signed(bradford_matrix[63:32])) / 65536.0,
+                $itor($signed(bradford_matrix[95:64])) / 65536.0);
         $fwrite(output_file, "  [%f, %f, %f]\n", 
-                $itor(bradford_matrix[127:96]) / 65536.0,
-                $itor(bradford_matrix[159:128]) / 65536.0,
-                $itor(bradford_matrix[191:160]) / 65536.0);
+                $itor($signed(bradford_matrix[127:96])) / 65536.0,
+                $itor($signed(bradford_matrix[159:128])) / 65536.0,
+                $itor($signed(bradford_matrix[191:160])) / 65536.0);
         $fwrite(output_file, "  [%f, %f, %f]\n", 
-                $itor(bradford_matrix[223:192]) / 65536.0,
-                $itor(bradford_matrix[255:224]) / 65536.0,
-                $itor(bradford_matrix[287:256]) / 65536.0);
+                $itor($signed(bradford_matrix[223:192])) / 65536.0,
+                $itor($signed(bradford_matrix[255:224])) / 65536.0,
+                $itor($signed(bradford_matrix[287:256])) / 65536.0);
 
         // Set matrix valid
         matrix_valid = 1;

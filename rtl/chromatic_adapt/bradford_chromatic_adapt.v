@@ -134,7 +134,7 @@ module bradford_chromatic_adapt (
                 
                 // Debug
                 $display("fp_divide: temp_a=%h, result=%h (%f)", 
-                         temp_a, result, $itor(result[31:0]) / 65536.0);
+                         temp_a, result, $itor($signed(result[31:0])) / 65536.0);
                          
                 // Saturate result if it exceeds 32-bit range
                 if (result > 64'h000000007FFFFFFF)
@@ -167,9 +167,9 @@ module bradford_chromatic_adapt (
         begin
             // Debug: Print ambient XYZ values
             $display("Ambient XYZ values: X=%f, Y=%f, Z=%f",
-                    $itor(amb_x) / 65536.0,
-                    $itor(amb_y) / 65536.0,
-                    $itor(amb_z) / 65536.0);
+                    $itor($signed(amb_x)) / 65536.0,
+                    $itor($signed(amb_y)) / 65536.0,
+                    $itor($signed(amb_z)) / 65536.0);
                     
             // Convert ambient XYZ to cone responses using Bradford matrix
             // Use saturation to prevent overflow/underflow
@@ -195,17 +195,17 @@ module bradford_chromatic_adapt (
             // Debug: Print Bradford matrix values
             $display("Bradford matrix:");
             $display("  [%f, %f, %f]", 
-                     $itor(M_BRAD_00) / 65536.0, 
-                     $itor(M_BRAD_01) / 65536.0, 
-                     $itor(M_BRAD_02) / 65536.0);
+                     $itor($signed(M_BRAD_00)) / 65536.0, 
+                     $itor($signed(M_BRAD_01)) / 65536.0, 
+                     $itor($signed(M_BRAD_02)) / 65536.0);
             $display("  [%f, %f, %f]", 
-                     $itor(M_BRAD_10) / 65536.0, 
-                     $itor(M_BRAD_11) / 65536.0, 
-                     $itor(M_BRAD_12) / 65536.0);
+                     $itor($signed(M_BRAD_10)) / 65536.0, 
+                     $itor($signed(M_BRAD_11)) / 65536.0, 
+                     $itor($signed(M_BRAD_12)) / 65536.0);
             $display("  [%f, %f, %f]", 
-                     $itor(M_BRAD_20) / 65536.0, 
-                     $itor(M_BRAD_21) / 65536.0, 
-                     $itor(M_BRAD_22) / 65536.0);
+                     $itor($signed(M_BRAD_20)) / 65536.0, 
+                     $itor($signed(M_BRAD_21)) / 65536.0, 
+                     $itor($signed(M_BRAD_22)) / 65536.0);
         end
     endtask
     
@@ -237,13 +237,13 @@ module bradford_chromatic_adapt (
         begin
             // Debug: Print cone responses
             $display("Ambient cone responses: L=%f, M=%f, S=%f",
-                    $itor(amb_cone_resp[31:0]) / 65536.0,
-                    $itor(amb_cone_resp[63:32]) / 65536.0,
-                    $itor(amb_cone_resp[95:64]) / 65536.0);
+                    $itor($signed(amb_cone_resp[31:0])) / 65536.0,
+                    $itor($signed(amb_cone_resp[63:32])) / 65536.0,
+                    $itor($signed(amb_cone_resp[95:64])) / 65536.0);
             $display("Reference cone responses: L=%f, M=%f, S=%f",
-                    $itor(ref_cone_resp[31:0]) / 65536.0,
-                    $itor(ref_cone_resp[63:32]) / 65536.0,
-                    $itor(ref_cone_resp[95:64]) / 65536.0);
+                    $itor($signed(ref_cone_resp[31:0])) / 65536.0,
+                    $itor($signed(ref_cone_resp[63:32])) / 65536.0,
+                    $itor($signed(ref_cone_resp[95:64])) / 65536.0);
                     
             // Calculate diagonal scaling matrix D
             // D = diag(Ref_LMS / Amb_LMS)
@@ -254,9 +254,9 @@ module bradford_chromatic_adapt (
             
             // Debug: Print the diagonal scale factors
             $display("Diagonal scale factors: L_scale=%f, M_scale=%f, S_scale=%f",
-                    $itor(diag_scale[31:0]) / 65536.0,
-                    $itor(diag_scale[63:32]) / 65536.0,
-                    $itor(diag_scale[95:64]) / 65536.0);
+                    $itor($signed(diag_scale[31:0])) / 65536.0,
+                    $itor($signed(diag_scale[63:32])) / 65536.0,
+                    $itor($signed(diag_scale[95:64])) / 65536.0);
         end
     endtask
 
@@ -349,11 +349,11 @@ module bradford_chromatic_adapt (
             // -------- Optional debug print (ModelSim/Questa) -------------
             $display("Bradford comp-matrix (Q16.16):");
             $display("[%f %f %f]",
-                    $itor(r00)/65536.0, $itor(r01)/65536.0, $itor(r02)/65536.0);
+                    $itor($signed(r00))/65536.0, $itor($signed(r01))/65536.0, $itor($signed(r02))/65536.0);
             $display("[%f %f %f]",
-                    $itor(r10)/65536.0, $itor(r11)/65536.0, $itor(r12)/65536.0);
+                    $itor($signed(r10))/65536.0, $itor($signed(r11))/65536.0, $itor($signed(r12))/65536.0);
             $display("[%f %f %f]",
-                    $itor(r20)/65536.0, $itor(r21)/65536.0, $itor(r22)/65536.0);
+                    $itor($signed(r20))/65536.0, $itor($signed(r21))/65536.0, $itor($signed(r22))/65536.0);
     `endif
         end
     endtask
