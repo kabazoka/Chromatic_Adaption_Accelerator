@@ -75,48 +75,9 @@ This script:
 
 ### Simulation
 
-#### Using Makefile (Linux/Mac/WSL)
-
-The project includes comprehensive testbenches for each module using Icarus Verilog:
-
-```bash
-# Run a specific testbench
-make i2c           # I2C interface
-make cct_xyz       # CCT to XYZ converter
-make bradford      # Bradford adaptation
-make image_proc    # Image processor
-make display       # Display driver
-make control       # Control unit
-make top           # Top-level system
-
-# View waveforms
-make view_i2c      # and similarly for other modules
-
-# Run all testbenches
-make all
-
-# Clean generated files
-make clean
-```
-
 #### Using Batch Script (Windows)
 
 For Windows users, simulation can also be run using the provided batch script:
-
-```bash
-# Run ModelSim simulation
-run_ca_simulation.bat
-```
-
-This script automatically:
-1. Sets up the ModelSim environment
-2. Compiles all RTL and testbench files
-3. Launches the ModelSim GUI with the specified testbench loaded
-4. Configures waveforms for viewing
-
-#### Color Checker Simulation (Windows)
-
-To run the chromatic adaptation simulation:
 
 ```bash
 # Run the chromatic adaptation simulation menu
@@ -154,6 +115,30 @@ The simulation applies a warm-tinting adaptation matrix that:
 **Prerequisites**: 
 - ModelSim must be installed and in your PATH
 - Python with the Pillow library (`pip install pillow`) for PNG/PPM conversions
+
+#### Using Makefile (Linux/Mac/WSL)
+
+The project includes comprehensive testbenches for each module using Icarus Verilog:
+
+```bash
+# Run a specific testbench
+make i2c           # I2C interface
+make cct_xyz       # CCT to XYZ converter
+make bradford      # Bradford adaptation
+make image_proc    # Image processor
+make display       # Display driver
+make control       # Control unit
+make top           # Top-level system
+
+# View waveforms
+make view_i2c      # and similarly for other modules
+
+# Run all testbenches
+make all
+
+# Clean generated files
+make clean
+```
 
 ## Implementation Details
 
