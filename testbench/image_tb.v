@@ -5,6 +5,7 @@ module image_tb;
     parameter IMAGE_WIDTH = 768;
     parameter IMAGE_HEIGHT = 512;
     parameter TOTAL_PIXELS = IMAGE_WIDTH * IMAGE_HEIGHT;
+    parameter CCT_VALUE = 6500; // Default D65, can be overridden via command line
 
     // Signals
     reg clk;
@@ -17,6 +18,13 @@ module image_tb;
     wire [23:0] output_rgb;
     wire output_valid;
     wire busy;
+    
+    // Bradford chromatic adaptation signals
+    reg [95:0] ambient_xyz;
+    reg xyz_valid;
+    reg [15:0] ref_cct;
+    wire [287:0] bradford_matrix;
+    wire bradford_matrix_valid;
 
     // File handlers
     integer input_file;
@@ -34,6 +42,17 @@ module image_tb;
     // PPM reading
     reg [8*100:1] line_buffer; // Buffer to read lines (up to 100 chars)
     reg comment_line;
+    
+    // Instantiate the Bradford Chromatic Adaptation module
+    bradford_chromatic_adapt bradford (
+        .clk(clk),
+        .rst_n(rst_n),
+        .ambient_xyz(ambient_xyz),
+        .xyz_valid(xyz_valid),
+        .ref_cct(ref_cct),
+        .comp_matrix(bradford_matrix),
+        .matrix_valid(bradford_matrix_valid)
+    );
 
     // Instantiate the Unit Under Test (UUT)
     image_processor uut (
@@ -123,30 +142,56 @@ module image_tb;
             $finish;
         end
 
+        // Log the CCT value being used
+        $display("Using CCT value: %d K", CCT_VALUE);
+
         // Initialize inputs
         rst_n = 0;
         input_rgb = 24'h000000;
         input_valid = 0;
         matrix_valid = 0;
         processed_pixels = 0;
-
-        // Initialize compensation matrix as identity matrix for testing
-        // This should output the same colors as input (no adaptation)
-        // For real adaptation, change to desired matrix values
-        comp_matrix[31:0]     = 32'h00011999; // 1.1 (boost red)
-        comp_matrix[63:32]    = 32'h00000000; // 0.0
-        comp_matrix[95:64]    = 32'h00000000; // 0.0
-        comp_matrix[127:96]   = 32'h00000000; // 0.0
-        comp_matrix[159:128]  = 32'h00010CCC; // 1.05 (slight boost green)
-        comp_matrix[191:160]  = 32'h00000000; // 0.0
-        comp_matrix[223:192]  = 32'h00000000; // 0.0
-        comp_matrix[255:224]  = 32'h00000000; // 0.0
-        comp_matrix[287:256]  = 32'h0000E666; // 0.9 (reduce blue)
+        
+        // Initialize Bradford inputs
+        ambient_xyz = 96'h0000F3330001000000011170A; // D65 white point (X=0.95047, Y=1.0, Z=1.08883)
+        xyz_valid = 0;
+        ref_cct = CCT_VALUE[15:0]; // Set the reference CCT from parameter
 
         // Reset sequence
         #100;
         rst_n = 1;
         #100;
+        
+        // Get compensation matrix from Bradford module
+        $display("Calculating compensation matrix for CCT=%d K...", CCT_VALUE);
+        xyz_valid = 1;
+        #(CLK_PERIOD);
+        xyz_valid = 0;
+        
+        // Wait for Bradford module to finish calculation
+        timeout_counter = 0;
+        while (!bradford_matrix_valid && timeout_counter < 1000) begin
+            #(CLK_PERIOD);
+            timeout_counter = timeout_counter + 1;
+        end
+        
+        if (timeout_counter >= 1000) begin
+            $display("Error: Timeout waiting for Bradford matrix calculation");
+            // Fall back to default matrix
+            comp_matrix[31:0]     = 32'h00011999; // 1.1 (boost red)
+            comp_matrix[63:32]    = 32'h00000000; // 0.0
+            comp_matrix[95:64]    = 32'h00000000; // 0.0
+            comp_matrix[127:96]   = 32'h00000000; // 0.0
+            comp_matrix[159:128]  = 32'h00010CCC; // 1.05 (slight boost green)
+            comp_matrix[191:160]  = 32'h00000000; // 0.0
+            comp_matrix[223:192]  = 32'h00000000; // 0.0
+            comp_matrix[255:224]  = 32'h00000000; // 0.0
+            comp_matrix[287:256]  = 32'h0000E666; // 0.9 (reduce blue)
+        end else begin
+            // Use the matrix from Bradford module
+            comp_matrix = bradford_matrix;
+            $display("Acquired Bradford compensation matrix");
+        end
 
         // Set matrix valid
         matrix_valid = 1;
@@ -183,11 +228,12 @@ module image_tb;
         
         // Write PPM header to output file
         $fwrite(output_file, "P3\n");
-        $fwrite(output_file, "# Chromatically adapted image\n");
+        $fwrite(output_file, "# Chromatically adapted image (CCT=%d K)\n", CCT_VALUE);
         $fwrite(output_file, "%d %d\n", IMAGE_WIDTH, IMAGE_HEIGHT);
         $fwrite(output_file, "255\n");
 
-        $display("Starting image processing (%dx%d = %d pixels)...", IMAGE_WIDTH, IMAGE_HEIGHT, TOTAL_PIXELS);
+        $display("Starting image processing (%dx%d = %d pixels) with CCT=%d K...", 
+                 IMAGE_WIDTH, IMAGE_HEIGHT, TOTAL_PIXELS, CCT_VALUE);
         
         // Process each pixel
         for (i = 0; i < IMAGE_HEIGHT; i = i + 1) begin
@@ -234,7 +280,7 @@ module image_tb;
 
         $fclose(input_file);
         $fclose(output_file);
-        $display("Simulation completed - output saved to output_image.ppm");
+        $display("Simulation completed - output saved to output_image.ppm (CCT=%d K)", CCT_VALUE);
         $finish;
     end
 

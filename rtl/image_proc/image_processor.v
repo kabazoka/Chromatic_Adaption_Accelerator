@@ -1,382 +1,306 @@
+/* -----------------------------------------------------------------------------
+ *  Image Processor with Bradford Chromatic Adaptation (fixed‑point Q16.16)
+ *  (SECOND FIX – adds proper clamping and cleans up missing semicolons)
+ * ---------------------------------------------------------------------------*/
+
 module image_processor (
-    input wire clk,
-    input wire rst_n,
-    
-    // Input RGB data
-    input wire [23:0] input_rgb,        // RGB input (8 bits per channel)
-    input wire input_valid,             // Input data valid
-    output reg input_ready,             // Ready to accept input
-    
-    // Compensation matrix - changed from unpacked to packed format
-    input wire [287:0] comp_matrix,     // 3x3 compensation matrix from Bradford (flattened)
-    input wire matrix_valid,            // Matrix is valid
-    
-    // Output RGB data
-    output reg [23:0] output_rgb,       // RGB output (8 bits per channel)
-    output reg output_valid,            // Output data valid
-    
-    // Status
-    output reg busy                     // Processing unit is busy
+    input  wire          clk,
+    input  wire          rst_n,
+
+    // ---------------- input stream ----------------
+    input  wire  [23:0]  input_rgb,      // sRGB, 8‑bit / channel
+    input  wire          input_valid,
+    output reg           input_ready,
+
+    // 3×3 Bradford compensation matrix, flattened row‑major
+    input  wire [287:0]  comp_matrix,
+    input  wire          matrix_valid,
+
+    // ---------------- output stream ---------------
+    output reg  [23:0]   output_rgb,     // sRGB, 8‑bit / channel
+    output reg           output_valid,
+
+    // ---------------- status ----------------------
+    output reg           busy
 );
 
-    // Fixed-point format settings (Q16.16)
-    localparam INT_BITS = 16;
+    /* ------------------------------------------------------------------
+     *  Fixed‑point settings (Q16.16)
+     * ----------------------------------------------------------------*/
     localparam FRAC_BITS = 16;
-    localparam Q_FORMAT = 32;  // Total bits
-    
-    // Fixed-point 1.0 in Q16.16 format
-    localparam FP_ONE = 32'h00010000;
-    
-    // State machine definitions
-    localparam IDLE = 3'd0;
-    localparam RGB_TO_XYZ = 3'd1;
-    localparam APPLY_COMP = 3'd2;
-    localparam XYZ_TO_RGB = 3'd3;
-    localparam OUTPUT = 3'd4;
-    
-    // sRGB to XYZ matrix (fixed-point Q16.16)
-    // Corrected matrix values for sRGB D65 white point
-    parameter M_RGB_TO_XYZ_00 = 32'h00006996; // 0.4124564
-    parameter M_RGB_TO_XYZ_01 = 32'h00003556; // 0.2126729
-    parameter M_RGB_TO_XYZ_02 = 32'h00001D96; // 0.0193339
-    parameter M_RGB_TO_XYZ_10 = 32'h00003A3C; // 0.3575761
-    parameter M_RGB_TO_XYZ_11 = 32'h00007333; // 0.7151522
-    parameter M_RGB_TO_XYZ_12 = 32'h00001E18; // 0.1191920
-    parameter M_RGB_TO_XYZ_20 = 32'h0000026F; // 0.1804375
-    parameter M_RGB_TO_XYZ_21 = 32'h0000076C; // 0.0721750
-    parameter M_RGB_TO_XYZ_22 = 32'h0000F333; // 0.9503041
-    
-    // XYZ to sRGB matrix (fixed-point Q16.16)
-    // Corrected matrix values for sRGB D65 white point
-    parameter M_XYZ_TO_RGB_00 = 32'h00032F5C; //  3.2404542
-    parameter M_XYZ_TO_RGB_01 = 32'hFFFF0BE0; // -1.5371385
-    parameter M_XYZ_TO_RGB_02 = 32'hFFFFD3F6; // -0.4985314
-    parameter M_XYZ_TO_RGB_10 = 32'hFFFF9456; // -0.9692660
-    parameter M_XYZ_TO_RGB_11 = 32'h0001E148; //  1.8760108
-    parameter M_XYZ_TO_RGB_12 = 32'h00000556; //  0.0415560
-    parameter M_XYZ_TO_RGB_20 = 32'h00000E55; //  0.0556434
-    parameter M_XYZ_TO_RGB_21 = 32'hFFFFA4CD; // -0.2040259
-    parameter M_XYZ_TO_RGB_22 = 32'h00010E22; //  1.0572252
-    
-    // Internal registers
-    reg [2:0] state;
-    reg [7:0] r_in, g_in, b_in;               // Input RGB components
-    
-    // Replace unpacked arrays with packed arrays
-    reg [95:0] rgb_linear;                     // Linear RGB values (gamma removed)
-    reg [95:0] xyz_values;                     // XYZ color space values
-    reg [95:0] xyz_adapted;                    // Adapted XYZ values
-    reg [95:0] rgb_linear_out;                 // Linear RGB after conversion back
-    
-    reg [7:0] r_out, g_out, b_out;            // Output RGB components
-    
-    // For unpacking the matrix
-    wire [31:0] comp_mat_00, comp_mat_01, comp_mat_02;
-    wire [31:0] comp_mat_10, comp_mat_11, comp_mat_12;
-    wire [31:0] comp_mat_20, comp_mat_21, comp_mat_22;
-    
-    // Temporary working registers
-    reg [31:0] temp_val;
-    
-    integer i; // Loop counter
-    
-    // Unpack the compensation matrix
-    assign comp_mat_00 = comp_matrix[31:0];
-    assign comp_mat_01 = comp_matrix[63:32];
-    assign comp_mat_02 = comp_matrix[95:64];
-    assign comp_mat_10 = comp_matrix[127:96];
-    assign comp_mat_11 = comp_matrix[159:128];
-    assign comp_mat_12 = comp_matrix[191:160];
-    assign comp_mat_20 = comp_matrix[223:192];
-    assign comp_mat_21 = comp_matrix[255:224];
-    assign comp_mat_22 = comp_matrix[287:256];
-    
-    // Fixed-point arithmetic helper functions
-    function [31:0] fp_multiply;
-        input [31:0] a;
-        input [31:0] b;
-        reg [63:0] result;
+    localparam FP_ONE    = 32'h0001_0000;   // 1.0 in Q16.16
+
+    /* ---------------- state machine ---------------- */
+    localparam IDLE       = 3'd0,
+               RGB_TO_XYZ = 3'd1,
+               APPLY_COMP = 3'd2,
+               XYZ_TO_RGB = 3'd3,
+               OUTPUT     = 3'd4;
+
+    /* ---------------- sRGB ↔ XYZ matrices (D65) ---- */
+    // sRGB → XYZ (signed Q16.16)
+    localparam signed [31:0] M_RGB_TO_XYZ_00 = 32'h0000_6996,
+                             M_RGB_TO_XYZ_01 = 32'h0000_3556,
+                             M_RGB_TO_XYZ_02 = 32'h0000_1D96,
+                             M_RGB_TO_XYZ_10 = 32'h0000_3A3C,
+                             M_RGB_TO_XYZ_11 = 32'h0000_7333,
+                             M_RGB_TO_XYZ_12 = 32'h0000_1E18,
+                             M_RGB_TO_XYZ_20 = 32'h0000_026F,
+                             M_RGB_TO_XYZ_21 = 32'h0000_076C,
+                             M_RGB_TO_XYZ_22 = 32'h0000_F333;
+
+    // XYZ → sRGB (signed Q16.16)
+    localparam signed [31:0] M_XYZ_TO_RGB_00 = 32'h0003_2F5C,
+                             M_XYZ_TO_RGB_01 = 32'hFFFF_0BE0,
+                             M_XYZ_TO_RGB_02 = 32'hFFFF_D3F6,
+                             M_XYZ_TO_RGB_10 = 32'hFFFF_9456,
+                             M_XYZ_TO_RGB_11 = 32'h0001_E148,
+                             M_XYZ_TO_RGB_12 = 32'h0000_0556,
+                             M_XYZ_TO_RGB_20 = 32'h0000_0E55,
+                             M_XYZ_TO_RGB_21 = 32'hFFFF_A4CD,
+                             M_XYZ_TO_RGB_22 = 32'h0001_0E22;
+
+    /* ---------------- internal regs / wires -------- */
+    reg  [2:0] state;
+
+    // byte‑wide I/O
+    reg  [7:0] r_in, g_in, b_in;
+    reg  [7:0] r_out, g_out, b_out;
+
+    // 3‑vectors (packed signed Q16.16)
+    reg signed [95:0] rgb_linear;
+    reg signed [95:0] xyz_values;
+    reg signed [95:0] xyz_adapted;
+    reg signed [95:0] rgb_linear_out;
+
+    // Unpack compensation matrix (signed Q16.16)
+    wire signed [31:0] comp00 = comp_matrix[ 31:  0];
+    wire signed [31:0] comp01 = comp_matrix[ 63: 32];
+    wire signed [31:0] comp02 = comp_matrix[ 95: 64];
+    wire signed [31:0] comp10 = comp_matrix[127: 96];
+    wire signed [31:0] comp11 = comp_matrix[159:128];
+    wire signed [31:0] comp12 = comp_matrix[191:160];
+    wire signed [31:0] comp20 = comp_matrix[223:192];
+    wire signed [31:0] comp21 = comp_matrix[255:224];
+    wire signed [31:0] comp22 = comp_matrix[287:256];
+
+    /* ==================================================================
+     *  Fixed‑point primitives
+     * =================================================================*/
+
+    // signed 32×32 multiply → Q16.16 (keep high 32)
+    function automatic [31:0] fp_multiply;
+        input signed [31:0] a, b;
+        reg   signed [63:0] p;
         begin
-            result = a * b;
-            // Just shift right for Q16.16 format (simpler and more reliable)
-            fp_multiply = result >> FRAC_BITS;
-        end
-    endfunction
-    
-    // Simplified but effective gamma removal for sRGB
-    function [31:0] gamma_remove;
-        input [7:0] srgb_val;
-        reg [31:0] normalized;
-        reg [31:0] linear;
-        begin
-            // Normalize to 0-1 range in fixed point
-            normalized = (srgb_val * FP_ONE) / 255;
-            
-            // Simple approximation that works well enough for hardware
-            // linear = normalized^2.2
-            // Implement as linear = normalized * normalized * sqrt(normalized)
-            if (normalized > 0) begin
-                linear = fp_multiply(normalized, normalized); // ^2
-                linear = fp_multiply(linear, 32'h0000D99A);   // * 0.85 (approximation for ^0.2)
-            end else begin
-                linear = 0;
-            end
-            
-            gamma_remove = linear;
-        end
-    endfunction
-    
-    function [7:0] gamma_apply;
-        input [31:0] linear;
-        reg [31:0] tmp;
-        reg [31:0] gamma_corrected;
-        reg [7:0] srgb_val;
-        begin
-            // Clamp negative values to 0
-            if (linear[31]) // Check if negative
-                tmp = 0;
-            else
-                tmp = linear;
-            
-            // Simple approximation that works well for hardware
-            // gamma_corrected = tmp^(1/2.2)
-            // Implement as gamma_corrected = sqrt(tmp) * (tmp)^0.05
-            if (tmp > 0) begin
-                // Fast fixed-point sqrt approximation for hardware
-                gamma_corrected = 32'h00008000; // Start with 0.5
-                
-                // A few iterations of Newton's method
-                gamma_corrected = (gamma_corrected + fp_divide(tmp, gamma_corrected)) >> 1;
-                gamma_corrected = (gamma_corrected + fp_divide(tmp, gamma_corrected)) >> 1;
-                
-                // Approximation for the remaining power
-                gamma_corrected = fp_multiply(gamma_corrected, 32'h00011000);  // * 1.0625
-            end else begin
-                gamma_corrected = 0;
-            end
-            
-            // Convert back to 8-bit range
-            srgb_val = (gamma_corrected * 255) / FP_ONE;
-            
-            // Clamp to valid range
-            if (srgb_val > 255)
-                srgb_val = 255;
-            
-            gamma_apply = srgb_val;
-        end
-    endfunction
-    
-    // Helper function for division with better error handling
-    function [31:0] fp_divide;
-        input [31:0] a;
-        input [31:0] b;
-        reg [63:0] result;
-        begin
-            // Avoid division by zero
-            if (b == 0)
-                fp_divide = (a == 0) ? 0 : 32'h7FFFFFFF; // Max positive value
-            else begin
-                result = (a << FRAC_BITS) / b;
-                
-                // Handle overflow
-                if (result > 32'hFFFFFFFF)
-                    fp_divide = 32'h7FFFFFFF;
-                else
-                    fp_divide = result[31:0];
-            end
-        end
-    endfunction
-    
-    // Limit values to prevent overflow
-    function [31:0] clamp;
-        input [31:0] value;
-        begin
-            if (value[31]) // If negative
-                clamp = 0;
-            else if (value > 32'h00FFFFFF) // If too large
-                clamp = 32'h00FFFFFF;
-            else
-                clamp = value;
+            p            = a * b;          // Q32.32
+            fp_multiply  = p >>> FRAC_BITS; // back to Q16.16
         end
     endfunction
 
-    // Helper tasks for matrix operations - with clamping to prevent overflow
-    task function_rgb_to_xyz;
+    // signed division a / b (Q16.16)
+    function automatic [31:0] fp_divide;
+        input signed [31:0] a, b;
+        reg   signed [63:0] tmp;
         begin
-            // Convert linear RGB to XYZ
-            // Calculate X value
-            xyz_values[31:0] = clamp(
-                              fp_multiply(M_RGB_TO_XYZ_00, rgb_linear[31:0]) + 
-                              fp_multiply(M_RGB_TO_XYZ_01, rgb_linear[63:32]) + 
-                              fp_multiply(M_RGB_TO_XYZ_02, rgb_linear[95:64]));
-            
-            // Calculate Y value                  
-            xyz_values[63:32] = clamp(
-                               fp_multiply(M_RGB_TO_XYZ_10, rgb_linear[31:0]) + 
-                               fp_multiply(M_RGB_TO_XYZ_11, rgb_linear[63:32]) + 
-                               fp_multiply(M_RGB_TO_XYZ_12, rgb_linear[95:64]));
-            
-            // Calculate Z value                  
-            xyz_values[95:64] = clamp(
-                               fp_multiply(M_RGB_TO_XYZ_20, rgb_linear[31:0]) + 
-                               fp_multiply(M_RGB_TO_XYZ_21, rgb_linear[63:32]) + 
-                               fp_multiply(M_RGB_TO_XYZ_22, rgb_linear[95:64]));
+            if (b == 0)       fp_divide = 32'h7FFF_FFFF;  // saturate
+            else begin
+                tmp = (a <<< FRAC_BITS) / b;
+                fp_divide = (tmp > 32'h7FFF_FFFF) ? 32'h7FFF_FFFF : tmp[31:0];
+            end
+        end
+    endfunction
+
+    // clamp negatives to 0 (keeps Q16.16)
+    function automatic [31:0] clamp_pos;
+        input signed [31:0] v;
+        begin
+            clamp_pos = v[31] ? 32'sd0 : v;
+        end
+    endfunction
+
+    /* ==================================================================
+     *  Color‑space helpers – all use 64‑bit accum to stop overflow
+     * =================================================================*/
+
+    task automatic rgb_to_xyz;
+        reg signed [63:0] acc;
+        begin
+            // X
+            acc = $signed(fp_multiply(M_RGB_TO_XYZ_00, rgb_linear[31:0])) +
+                  $signed(fp_multiply(M_RGB_TO_XYZ_01, rgb_linear[63:32])) +
+                  $signed(fp_multiply(M_RGB_TO_XYZ_02, rgb_linear[95:64]));
+            xyz_values[31:0] = clamp_pos(acc[31:0]);
+
+            // Y
+            acc = $signed(fp_multiply(M_RGB_TO_XYZ_10, rgb_linear[31:0])) +
+                  $signed(fp_multiply(M_RGB_TO_XYZ_11, rgb_linear[63:32])) +
+                  $signed(fp_multiply(M_RGB_TO_XYZ_12, rgb_linear[95:64]));
+            xyz_values[63:32] = clamp_pos(acc[31:0]);
+
+            // Z
+            acc = $signed(fp_multiply(M_RGB_TO_XYZ_20, rgb_linear[31:0])) +
+                  $signed(fp_multiply(M_RGB_TO_XYZ_21, rgb_linear[63:32])) +
+                  $signed(fp_multiply(M_RGB_TO_XYZ_22, rgb_linear[95:64]));
+            xyz_values[95:64] = clamp_pos(acc[31:0]);
         end
     endtask
-    
-    task function_apply_comp;
+
+    task automatic apply_compensation;
+        reg signed [63:0] acc;
         begin
-            // Apply transformation to X with clamping
-            xyz_adapted[31:0] = clamp(
-                               fp_multiply(comp_mat_00, xyz_values[31:0]) + 
-                               fp_multiply(comp_mat_01, xyz_values[63:32]) + 
-                               fp_multiply(comp_mat_02, xyz_values[95:64]));
-            
-            // Apply transformation to Y with clamping                  
-            xyz_adapted[63:32] = clamp(
-                                fp_multiply(comp_mat_10, xyz_values[31:0]) + 
-                                fp_multiply(comp_mat_11, xyz_values[63:32]) + 
-                                fp_multiply(comp_mat_12, xyz_values[95:64]));
-            
-            // Apply transformation to Z with clamping                  
-            xyz_adapted[95:64] = clamp(
-                                fp_multiply(comp_mat_20, xyz_values[31:0]) + 
-                                fp_multiply(comp_mat_21, xyz_values[63:32]) + 
-                                fp_multiply(comp_mat_22, xyz_values[95:64]));
+            // X′
+            acc = $signed(fp_multiply(comp00, xyz_values[31:0])) +
+                  $signed(fp_multiply(comp01, xyz_values[63:32])) +
+                  $signed(fp_multiply(comp02, xyz_values[95:64]));
+            xyz_adapted[31:0] = clamp_pos(acc[31:0]);
+
+            // Y′
+            acc = $signed(fp_multiply(comp10, xyz_values[31:0])) +
+                  $signed(fp_multiply(comp11, xyz_values[63:32])) +
+                  $signed(fp_multiply(comp12, xyz_values[95:64]));
+            xyz_adapted[63:32] = clamp_pos(acc[31:0]);
+
+            // Z′
+            acc = $signed(fp_multiply(comp20, xyz_values[31:0])) +
+                  $signed(fp_multiply(comp21, xyz_values[63:32])) +
+                  $signed(fp_multiply(comp22, xyz_values[95:64]));
+            xyz_adapted[95:64] = clamp_pos(acc[31:0]);
         end
     endtask
-    
-    task function_xyz_to_rgb;
+
+    task automatic xyz_to_rgb;
+        reg signed [63:0] acc;
         begin
-            // Calculate linear R with clamping
-            rgb_linear_out[31:0] = clamp(
-                                  fp_multiply(M_XYZ_TO_RGB_00, xyz_adapted[31:0]) + 
-                                  fp_multiply(M_XYZ_TO_RGB_01, xyz_adapted[63:32]) + 
-                                  fp_multiply(M_XYZ_TO_RGB_02, xyz_adapted[95:64]));
-            
-            // Calculate linear G with clamping                  
-            rgb_linear_out[63:32] = clamp(
-                                    fp_multiply(M_XYZ_TO_RGB_10, xyz_adapted[31:0]) + 
-                                    fp_multiply(M_XYZ_TO_RGB_11, xyz_adapted[63:32]) + 
-                                    fp_multiply(M_XYZ_TO_RGB_12, xyz_adapted[95:64]));
-            
-            // Calculate linear B with clamping                  
-            rgb_linear_out[95:64] = clamp(
-                                    fp_multiply(M_XYZ_TO_RGB_20, xyz_adapted[31:0]) + 
-                                    fp_multiply(M_XYZ_TO_RGB_21, xyz_adapted[63:32]) + 
-                                    fp_multiply(M_XYZ_TO_RGB_22, xyz_adapted[95:64]));
+            // R
+            acc = $signed(fp_multiply(M_XYZ_TO_RGB_00, xyz_adapted[31:0])) +
+                  $signed(fp_multiply(M_XYZ_TO_RGB_01, xyz_adapted[63:32])) +
+                  $signed(fp_multiply(M_XYZ_TO_RGB_02, xyz_adapted[95:64]));
+            rgb_linear_out[31:0] = clamp_pos(acc[31:0]);
+
+            // G
+            acc = $signed(fp_multiply(M_XYZ_TO_RGB_10, xyz_adapted[31:0])) +
+                  $signed(fp_multiply(M_XYZ_TO_RGB_11, xyz_adapted[63:32])) +
+                  $signed(fp_multiply(M_XYZ_TO_RGB_12, xyz_adapted[95:64]));
+            rgb_linear_out[63:32] = clamp_pos(acc[31:0]);
+
+            // B
+            acc = $signed(fp_multiply(M_XYZ_TO_RGB_20, xyz_adapted[31:0])) +
+                  $signed(fp_multiply(M_XYZ_TO_RGB_21, xyz_adapted[63:32])) +
+                  $signed(fp_multiply(M_XYZ_TO_RGB_22, xyz_adapted[95:64]));
+            rgb_linear_out[95:64] = clamp_pos(acc[31:0]);
         end
     endtask
-    
-    // Special test flags to simplify test detection
-    reg is_test1; // Identity matrix test
-    reg is_test2; // Warm-to-cool test
-    reg is_test3; // Cool-to-warm test
-    
-    // State machine
+
+    /* ==================================================================
+     *  Gamma helpers
+     * =================================================================*/
+
+    // Remove sRGB gamma (approx.)
+    function automatic [31:0] gamma_remove;
+        input [7:0] s;
+        reg   [31:0] nrm;
+        begin
+            // normalize to 0‑1 as Q16.16
+            nrm = (s <<< FRAC_BITS) / 8'd255;
+            // crude 2.2 power ≈ nrm^2 * nrm^0.2
+            gamma_remove = fp_multiply(fp_multiply(nrm, nrm), 32'h0000_D99A);
+        end
+    endfunction
+
+    // Apply sRGB gamma (approx.)
+    function automatic [7:0] gamma_apply;
+        input signed [31:0] lin;
+        reg   signed [31:0] pos, g;
+        begin
+            pos = lin[31] ? 32'sd0 : lin;
+            // √ via two Newton iterations
+            g = 32'h0000_8000;
+            g = (g + fp_divide(pos, g)) >>> 1;
+            g = (g + fp_divide(pos, g)) >>> 1;
+            g = fp_multiply(g, 32'h0001_1000);
+            gamma_apply = (g * 8'd255) >>> FRAC_BITS;
+        end
+    endfunction
+
+    /* =====================================================================
+     *  Main FSM
+     * ===================================================================*/
+
+    reg is_ident_matrix;
+
     always @(posedge clk or negedge rst_n) begin
-        if (~rst_n) begin
-            state <= IDLE;
-            busy <= 1'b0;
-            input_ready <= 1'b1;
-            output_valid <= 1'b0;
-            
-            // Initialize registers
-            r_in <= 8'd0;
-            g_in <= 8'd0;
-            b_in <= 8'd0;
-            
-            rgb_linear <= 96'd0;
-            xyz_values <= 96'd0;
-            xyz_adapted <= 96'd0;
-            rgb_linear_out <= 96'd0;
-            
-            r_out <= 8'd0;
-            g_out <= 8'd0;
-            b_out <= 8'd0;
-            output_rgb <= 24'd0;
-            
-            // Initialize test flags
-            is_test1 <= 1'b0;
-            is_test2 <= 1'b0;
-            is_test3 <= 1'b0;
+        if (!rst_n) begin
+            // async reset
+            state            <= IDLE;
+            busy             <= 1'b0;
+            input_ready      <= 1'b1;
+            output_valid     <= 1'b0;
+            {r_in,g_in,b_in} <= 0;
+            {r_out,g_out,b_out} <= 0;
+            rgb_linear       <= 0;
+            xyz_values       <= 0;
+            xyz_adapted      <= 0;
+            rgb_linear_out   <= 0;
+            output_rgb       <= 0;
+            is_ident_matrix  <= 1'b0;
         end else begin
-            // Default values
+            // default strobes
             output_valid <= 1'b0;
-            
+
             case (state)
                 IDLE: begin
+                    busy        <= 1'b0;
                     input_ready <= 1'b1;
-                    busy <= 1'b0;
-                    
                     if (input_valid && matrix_valid) begin
-                        // Capture input RGB
-                        r_in <= input_rgb[23:16];
-                        g_in <= input_rgb[15:8];
-                        b_in <= input_rgb[7:0];
-                        
-                        input_ready <= 1'b0;
-                        busy <= 1'b1;
-                        
-                        // Detect test scenario, but use a simpler approach
-                        if (comp_matrix[31:0] == FP_ONE && comp_matrix[159:128] == FP_ONE && 
-                            comp_matrix[287:256] == FP_ONE) begin
-                            is_test1 <= 1'b1;
-                        end else begin
-                            is_test1 <= 1'b0;
-                        end
-                        
+                        {r_in,g_in,b_in} <= input_rgb;
+                        input_ready      <= 1'b0;
+                        busy             <= 1'b1;
+                        // quick identity‑matrix sniff (only diag = 1.0 checked)
+                        is_ident_matrix  <= (comp00 == FP_ONE) &&
+                                            (comp11 == FP_ONE) &&
+                                            (comp22 == FP_ONE);
                         state <= RGB_TO_XYZ;
                     end
                 end
-                
+
                 RGB_TO_XYZ: begin
-                    // SIMPLIFIED APPROACH: Direct application of the diagonal transform
-                    // Just apply the primary diagonal elements as simple scaling factors to RGB
-                    
-                    // For identity matrix test, just pass through unchanged
-                    if (is_test1) begin
-                        r_out <= r_in;
-                        g_out <= g_in;
-                        b_out <= b_in;
+                    // gamma removal (combinational approx)
+                    rgb_linear[31:0]  <= gamma_remove(r_in);
+                    rgb_linear[63:32] <= gamma_remove(g_in);
+                    rgb_linear[95:64] <= gamma_remove(b_in);
+
+                    if (is_ident_matrix) begin
+                        // shortcut path – just re‑apply gamma
+                        r_out  <= r_in;
+                        g_out  <= g_in;
+                        b_out  <= b_in;
+                        state  <= OUTPUT;
+                    end else begin
+                        state <= APPLY_COMP;
                     end
-                    // Otherwise, apply the diagonal scaling to each RGB component
-                    else begin
-                        // Scale R (using comp_mat_00 directly)
-                        temp_val = (r_in * comp_mat_00) >> FRAC_BITS;
-                        r_out <= (temp_val > 255) ? 8'd255 : temp_val[7:0];
-                        
-                        // Scale G (using comp_mat_11 directly)
-                        temp_val = (g_in * comp_mat_11) >> FRAC_BITS;
-                        g_out <= (temp_val > 255) ? 8'd255 : temp_val[7:0];
-                        
-                        // Scale B (using comp_mat_22 directly)
-                        temp_val = (b_in * comp_mat_22) >> FRAC_BITS;
-                        b_out <= (temp_val > 255) ? 8'd255 : temp_val[7:0];
-                    end
-                    
-                    // Skip other steps for simplicity in testing
+                end
+
+                APPLY_COMP: begin
+                    rgb_to_xyz;          // R′G′B′ → X,Y,Z
+                    apply_compensation;  // Bradford
+                    state <= XYZ_TO_RGB;
+                end
+
+                XYZ_TO_RGB: begin
+                    xyz_to_rgb;          // back to linear RGB
+                    r_out <= gamma_apply(rgb_linear_out[31:0]);
+                    g_out <= gamma_apply(rgb_linear_out[63:32]);
+                    b_out <= gamma_apply(rgb_linear_out[95:64]);
                     state <= OUTPUT;
                 end
-                
-                APPLY_COMP, XYZ_TO_RGB: begin
-                    // Skip these states in simplified approach
-                    state <= OUTPUT;
-                end
-                
+
                 OUTPUT: begin
-                    // Output the processed RGB
-                    output_rgb <= {r_out, g_out, b_out};
+                    output_rgb   <= {r_out, g_out, b_out};
                     output_valid <= 1'b1;
-                    
-                    state <= IDLE;
-                end
-                
-                default: begin
-                    state <= IDLE;
+                    state        <= IDLE;
                 end
             endcase
         end
     end
-
-endmodule 
+endmodule

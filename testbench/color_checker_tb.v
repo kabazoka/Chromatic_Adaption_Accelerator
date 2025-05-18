@@ -2,6 +2,7 @@ module color_checker_tb;
 
     // Parameters
     parameter CLK_PERIOD = 20; // 50MHz clock
+    parameter CCT_VALUE = 6500; // Default D65, can be overridden via command line
 
     // Signals
     reg clk;
@@ -14,6 +15,13 @@ module color_checker_tb;
     wire [23:0] output_rgb;
     wire output_valid;
     wire busy;
+    
+    // Bradford chromatic adaptation signals
+    reg [95:0] ambient_xyz;
+    reg xyz_valid;
+    reg [15:0] ref_cct;
+    wire [287:0] bradford_matrix;
+    wire bradford_matrix_valid;
 
     // File handlers
     integer output_file;
@@ -25,6 +33,17 @@ module color_checker_tb;
     reg [23:0] color_checker[0:23];
     reg [23:0] output_pixels[0:23];
     reg [4:0] pixel_counter;
+
+    // Instantiate the Bradford Chromatic Adaptation module
+    bradford_chromatic_adapt bradford (
+        .clk(clk),
+        .rst_n(rst_n),
+        .ambient_xyz(ambient_xyz),
+        .xyz_valid(xyz_valid),
+        .ref_cct(ref_cct),
+        .comp_matrix(bradford_matrix),
+        .matrix_valid(bradford_matrix_valid)
+    );
 
     // Instantiate the Unit Under Test (UUT)
     image_processor uut (
@@ -93,6 +112,21 @@ module color_checker_tb;
                 // Capture output
                 output_pixels[pixel_idx] = output_rgb;
                 display_rgb(output_rgb, pixel_idx);
+                
+                // Debug: Print matrix values each time
+                $fwrite(output_file, "Compensation Matrix:\n");
+                $fwrite(output_file, "  [%f, %f, %f]\n", 
+                        $itor(comp_matrix[31:0]) / 65536.0,
+                        $itor(comp_matrix[63:32]) / 65536.0,
+                        $itor(comp_matrix[95:64]) / 65536.0);
+                $fwrite(output_file, "  [%f, %f, %f]\n", 
+                        $itor(comp_matrix[127:96]) / 65536.0,
+                        $itor(comp_matrix[159:128]) / 65536.0,
+                        $itor(comp_matrix[191:160]) / 65536.0);
+                $fwrite(output_file, "  [%f, %f, %f]\n", 
+                        $itor(comp_matrix[223:192]) / 65536.0,
+                        $itor(comp_matrix[255:224]) / 65536.0,
+                        $itor(comp_matrix[287:256]) / 65536.0);
             end
 
             // Allow some time between pixels
@@ -109,12 +143,24 @@ module color_checker_tb;
         // Open output file
         output_file = $fopen("color_checker_output.txt", "w");
 
+        // Log the CCT value being used
+        $display("Using CCT value: %d K", CCT_VALUE);
+        $fwrite(output_file, "Using CCT value: %d K\n\n", CCT_VALUE);
+
         // Initialize inputs
         rst_n = 0;
         input_rgb = 24'h000000;
         input_valid = 0;
         matrix_valid = 0;
         pixel_counter = 0;
+        
+        // Initialize Bradford inputs - Fix D65 value format for proper fixed point representation
+        // D65 white point (X=0.95047, Y=1.0, Z=1.08883) in Q16.16 format
+        ambient_xyz[31:0] = 32'h0000F333;    // 0.95047 in fixed point
+        ambient_xyz[63:32] = 32'h00010000;   // 1.0 in fixed point
+        ambient_xyz[95:64] = 32'h00011666;   // 1.08883 in fixed point
+        xyz_valid = 0;
+        ref_cct = CCT_VALUE[15:0]; // Set the reference CCT from parameter
 
         // Initialize Color Checker Classic patches
         // Row 1
@@ -146,22 +192,73 @@ module color_checker_tb;
         color_checker[22] = 24'h555555; // Neutral 3.5 (85, 85, 85)
         color_checker[23] = 24'h343434; // Black (52, 52, 52)
 
-        // Initialize compensation matrix for a cool-to-warm transformation
-        // Identity matrix with slight warm tint
-        comp_matrix[31:0]     = 32'h00011999; // 1.1 (boost red)
-        comp_matrix[63:32]    = 32'h00000000; // 0.0
-        comp_matrix[95:64]    = 32'h00000000; // 0.0
-        comp_matrix[127:96]   = 32'h00000000; // 0.0
-        comp_matrix[159:128]  = 32'h00010CCC; // 1.05 (slight boost green)
-        comp_matrix[191:160]  = 32'h00000000; // 0.0
-        comp_matrix[223:192]  = 32'h00000000; // 0.0
-        comp_matrix[255:224]  = 32'h00000000; // 0.0
-        comp_matrix[287:256]  = 32'h0000E666; // 0.9 (reduce blue)
-
         // Reset sequence
         #100;
         rst_n = 1;
         #100;
+        
+        // Get compensation matrix from Bradford module
+        $display("Calculating compensation matrix for CCT=%d K...", CCT_VALUE);
+        xyz_valid = 1;
+        #(CLK_PERIOD);
+        xyz_valid = 0;
+        
+        // Wait for Bradford module to finish calculation
+        timeout_counter = 0;
+        while (!bradford_matrix_valid && timeout_counter < 1000) begin
+            #(CLK_PERIOD);
+            timeout_counter = timeout_counter + 1;
+        end
+        
+        if (timeout_counter >= 1000) begin
+            $display("Error: Timeout waiting for Bradford matrix calculation");
+            // Log the error and try again with longer timeout
+            timeout_counter = 0;
+            $display("Retrying with longer timeout...");
+            while (!bradford_matrix_valid && timeout_counter < 5000) begin
+                #(CLK_PERIOD);
+                timeout_counter = timeout_counter + 1;
+            end
+            
+            if (timeout_counter >= 5000) begin
+                $display("Error: Bradford module not responding. Check connections and reset logic.");
+                $finish;
+            end
+        end
+        
+        // Use the matrix from Bradford module
+        comp_matrix = bradford_matrix;
+        $display("Acquired Bradford compensation matrix");
+        
+        // Debug output of matrix values (in floating point for readability)
+        $display("Bradford Compensation Matrix:");
+        $display("  [%f, %f, %f]", 
+                 $itor(bradford_matrix[31:0]) / 65536.0,
+                 $itor(bradford_matrix[63:32]) / 65536.0,
+                 $itor(bradford_matrix[95:64]) / 65536.0);
+        $display("  [%f, %f, %f]", 
+                 $itor(bradford_matrix[127:96]) / 65536.0,
+                 $itor(bradford_matrix[159:128]) / 65536.0,
+                 $itor(bradford_matrix[191:160]) / 65536.0);
+        $display("  [%f, %f, %f]", 
+                 $itor(bradford_matrix[223:192]) / 65536.0,
+                 $itor(bradford_matrix[255:224]) / 65536.0,
+                 $itor(bradford_matrix[287:256]) / 65536.0);
+                 
+        // Write matrix to output file
+        $fwrite(output_file, "Compensation Matrix:\n");
+        $fwrite(output_file, "  [%f, %f, %f]\n", 
+                $itor(bradford_matrix[31:0]) / 65536.0,
+                $itor(bradford_matrix[63:32]) / 65536.0,
+                $itor(bradford_matrix[95:64]) / 65536.0);
+        $fwrite(output_file, "  [%f, %f, %f]\n", 
+                $itor(bradford_matrix[127:96]) / 65536.0,
+                $itor(bradford_matrix[159:128]) / 65536.0,
+                $itor(bradford_matrix[191:160]) / 65536.0);
+        $fwrite(output_file, "  [%f, %f, %f]\n", 
+                $itor(bradford_matrix[223:192]) / 65536.0,
+                $itor(bradford_matrix[255:224]) / 65536.0,
+                $itor(bradford_matrix[287:256]) / 65536.0);
 
         // Set matrix valid
         matrix_valid = 1;
@@ -172,7 +269,7 @@ module color_checker_tb;
             display_rgb(color_checker[i], i);
         end
 
-        $fwrite(output_file, "\n==== Chromatically Adapted Values ====\n");
+        $fwrite(output_file, "\n==== Chromatically Adapted Values (CCT=%d K) ====\n", CCT_VALUE);
 
         // Process all pixels using the more robust method
         for (i = 0; i < 24; i = i + 1) begin
@@ -182,7 +279,7 @@ module color_checker_tb;
         // Create output PPM file
         ppm_file = $fopen("color_checker_output.ppm", "w");
         $fwrite(ppm_file, "P3\n");
-        $fwrite(ppm_file, "# Chromatically adapted 6x4 color checker\n");
+        $fwrite(ppm_file, "# Chromatically adapted 6x4 color checker (CCT=%d K)\n", CCT_VALUE);
         $fwrite(ppm_file, "6 4\n");
         $fwrite(ppm_file, "255\n");
 
