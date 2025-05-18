@@ -26,3 +26,7 @@ incremental_db/
 *.vst
 *.vstf
 simulation/modelsim/
+
+# pycache
+__pycache__/
+*.pyc
