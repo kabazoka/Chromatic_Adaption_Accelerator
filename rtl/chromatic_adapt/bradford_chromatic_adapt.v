@@ -137,10 +137,11 @@ module bradford_chromatic_adapt (
                          temp_a, result, $itor($signed(result[31:0])) / 65536.0);
                          
                 // Saturate result if it exceeds 32-bit range
-                if (result > 64'h000000007FFFFFFF)
+                // Assuming result of (positive_a << FRAC_BITS) / positive_b is positive
+                if (result > 64'h000000007FFFFFFF) begin
+                    $display("fp_divide: Saturation to MAX_POS. Original result: %h (%f)", result, $itor($signed(result[31:0])) / 65536.0);
                     result = 64'h000000007FFFFFFF;
-                else if (result < 64'hFFFFFFFF80000000)
-                    result = 64'hFFFFFFFF80000000;
+                end
             end
             fp_divide = result[31:0];
         end
@@ -294,49 +295,49 @@ module bradford_chromatic_adapt (
             acc =   $signed(fp_multiply(M_BRAD_INV_00, temp_result[ 31:  0]))
                 + $signed(fp_multiply(M_BRAD_INV_01, temp_result[127: 96]))
                 + $signed(fp_multiply(M_BRAD_INV_02, temp_result[223:192]));
-            r00 = saturate(acc[47:16], -FP_TWO, FP_TWO);
+            r00 = saturate(acc[31:0], -FP_TWO, FP_TWO);
 
             acc =   $signed(fp_multiply(M_BRAD_INV_00, temp_result[ 63: 32]))
                 + $signed(fp_multiply(M_BRAD_INV_01, temp_result[159:128]))
                 + $signed(fp_multiply(M_BRAD_INV_02, temp_result[255:224]));
-            r01 = saturate(acc[47:16], -FP_TWO, FP_TWO);
+            r01 = saturate(acc[31:0], -FP_TWO, FP_TWO);
 
             acc =   $signed(fp_multiply(M_BRAD_INV_00, temp_result[ 95: 64]))
                 + $signed(fp_multiply(M_BRAD_INV_01, temp_result[191:160]))
                 + $signed(fp_multiply(M_BRAD_INV_02, temp_result[287:256]));
-            r02 = saturate(acc[47:16], -FP_TWO, FP_TWO);
+            r02 = saturate(acc[31:0], -FP_TWO, FP_TWO);
 
             // -------- Row 1 ------------------------------------------------
             acc =   $signed(fp_multiply(M_BRAD_INV_10, temp_result[ 31:  0]))
                 + $signed(fp_multiply(M_BRAD_INV_11, temp_result[127: 96]))
                 + $signed(fp_multiply(M_BRAD_INV_12, temp_result[223:192]));
-            r10 = saturate(acc[47:16], -FP_TWO, FP_TWO);
+            r10 = saturate(acc[31:0], -FP_TWO, FP_TWO);
 
             acc =   $signed(fp_multiply(M_BRAD_INV_10, temp_result[ 63: 32]))
                 + $signed(fp_multiply(M_BRAD_INV_11, temp_result[159:128]))
                 + $signed(fp_multiply(M_BRAD_INV_12, temp_result[255:224]));
-            r11 = saturate(acc[47:16], -FP_TWO, FP_TWO);
+            r11 = saturate(acc[31:0], -FP_TWO, FP_TWO);
 
             acc =   $signed(fp_multiply(M_BRAD_INV_10, temp_result[ 95: 64]))
                 + $signed(fp_multiply(M_BRAD_INV_11, temp_result[191:160]))
                 + $signed(fp_multiply(M_BRAD_INV_12, temp_result[287:256]));
-            r12 = saturate(acc[47:16], -FP_TWO, FP_TWO);
+            r12 = saturate(acc[31:0], -FP_TWO, FP_TWO);
 
             // -------- Row 2 ------------------------------------------------
             acc =   $signed(fp_multiply(M_BRAD_INV_20, temp_result[ 31:  0]))
                 + $signed(fp_multiply(M_BRAD_INV_21, temp_result[127: 96]))
                 + $signed(fp_multiply(M_BRAD_INV_22, temp_result[223:192]));
-            r20 = saturate(acc[47:16], -FP_TWO, FP_TWO);
+            r20 = saturate(acc[31:0], -FP_TWO, FP_TWO);
 
             acc =   $signed(fp_multiply(M_BRAD_INV_20, temp_result[ 63: 32]))
                 + $signed(fp_multiply(M_BRAD_INV_21, temp_result[159:128]))
                 + $signed(fp_multiply(M_BRAD_INV_22, temp_result[255:224]));
-            r21 = saturate(acc[47:16], -FP_TWO, FP_TWO);
+            r21 = saturate(acc[31:0], -FP_TWO, FP_TWO);
 
             acc =   $signed(fp_multiply(M_BRAD_INV_20, temp_result[ 95: 64]))
                 + $signed(fp_multiply(M_BRAD_INV_21, temp_result[191:160]))
                 + $signed(fp_multiply(M_BRAD_INV_22, temp_result[287:256]));
-            r22 = saturate(acc[47:16], -FP_TWO, FP_TWO);
+            r22 = saturate(acc[31:0], -FP_TWO, FP_TWO);
 
             //------------------------------------------------------------
             // 3. Pack 3×3 → 288-bit bus (row-major order)

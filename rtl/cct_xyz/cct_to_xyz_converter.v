@@ -77,11 +77,13 @@ module cct_to_xyz_converter (
                 $display("cct_to_xyz fp_divide: temp_a=%h, result=%h (%f)", 
                          temp_a, result, $itor(result[31:0]) / 65536.0);
                          
-                // Saturate result if it exceeds 32-bit range
-                if (result > 64'h000000007FFFFFFF)
-                    result = 64'h000000007FFFFFFF;
-                else if (result < 64'hFFFFFFFF80000000)
-                    result = 64'hFFFFFFFF80000000;
+                // Saturate result if it exceeds 32-bit signed range.
+                // The division temp_a / b as currently implemented (unsigned a zero-extended, unsigned b)
+                // produces a non-negative 64-bit result.
+                // Therefore, we only need to check for overflow against the maximum positive 32-bit value.
+                if (result > 64'h000000007FFFFFFF) begin
+                    result = 64'h000000007FFFFFFF; // Clamp to MAX_S32
+                end
             end
             fp_divide = result[31:0];
         end

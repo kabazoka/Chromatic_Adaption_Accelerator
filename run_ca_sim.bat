@@ -1,5 +1,6 @@
 @echo off
-chcp 65001 >nul           rem  ← New: Change to UTF-8 code page
+set "PATH=%SystemRoot%\System32;%PATH%"
+chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 rem ===================================================
@@ -32,19 +33,42 @@ echo ModelSim path set to: %MODELSIM_PATH%
 rem === Python Environment Setup ===
 set "VENV_DIR=venv"
 set "PYTHON_BIN=python"
+set "CONDA_FOUND=0"
 
-rem Check if Python is installed
-where python >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: Python not found. Please install Python 3.x from https://www.python.org/downloads/
-    pause & exit /b 1
+rem Check if Conda is installed
+conda --version >nul 2>&1
+if not errorlevel 1 (
+    echo Found Conda installation.
+    set "CONDA_FOUND=1"
+    set "PYTHON_BIN=python"
+    rem Assuming 'python' will be the conda python
+    goto :conda_setup_complete
 )
 
-rem Get Python version
-for /f "tokens=2" %%I in ('python --version 2^>^&1') do set PYTHON_VERSION=%%I
+:conda_setup_complete
+rem If Conda not found, check for standard Python
+echo Checking for Python installation...
+python --version >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: Python not found.
+    echo Please ensure Python (3.x) or Conda is installed and added to your PATH.
+    echo Python can be downloaded from https://www.python.org/downloads/
+    echo Conda can be downloaded from https://www.anaconda.com/products/distribution
+    echo.
+    echo DEBUG: Current PATH is %PATH%
+    pause & exit /b 1
+)
+echo Found Python installation.
+
+rem Get Python version using a simpler approach
+python -c "import sys; print(sys.version.split()[0])" > temp_version.txt
+set /p PYTHON_VERSION=<temp_version.txt
+del temp_version.txt
 echo Found Python version: %PYTHON_VERSION%
 
 rem Create venv if it doesn't exist
+if "%CONDA_FOUND%"=="1" goto :conda_setup_complete
+
 if not exist "%VENV_DIR%" (
     echo Creating Python virtual environment...
     python -m venv "%VENV_DIR%" 2>nul

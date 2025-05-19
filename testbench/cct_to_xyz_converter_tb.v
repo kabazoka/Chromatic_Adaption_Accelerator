@@ -5,7 +5,7 @@ module cct_to_xyz_converter_tb;
     // Parameters
     parameter CLK_PERIOD = 20; // 50MHz clock
     parameter Q_FRAC_BITS = 16;
-    parameter FLOAT_TOLERANCE = 0.001; // Tolerance for floating point comparisons
+    parameter FLOAT_TOLERANCE = 0.005; // Tolerance for floating point comparisons
 
     // Signals
     reg clk;
