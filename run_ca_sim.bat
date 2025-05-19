@@ -7,42 +7,76 @@ echo ===================================================
 echo  Chromatic Adaptation Accelerator - Simulation Menu
 echo ===================================================
 
-rem === ModelSim Directory ===
-set "MODELSIM_PATH=E:\altera\13.0sp1\modelsim_ase\win32aloem"
+rem === Find ModelSim Installation ===
+set "FOUND_MODELSIM=0"
+set "COMMON_PATHS=C:\intelFPGA_lite\20.1\modelsim_ase\win32aloem;C:\altera\13.0sp1\modelsim_ase\win32aloem;E:\altera\13.0sp1\modelsim_ase\win32aloem;C:\intelFPGA\20.1\modelsim_ase\win32aloem"
+
+for %%p in (%COMMON_PATHS%) do (
+    if exist "%%p\vlib.exe" (
+        set "MODELSIM_PATH=%%p"
+        set "FOUND_MODELSIM=1"
+        goto :modelsim_found
+    )
+)
+
+:modelsim_found
+if "%FOUND_MODELSIM%"=="0" (
+    echo ERROR: Could not find ModelSim installation automatically.
+    goto ask_path
+)
+
 rem System32 first, then ModelSim
 set "PATH=%SystemRoot%\System32;%MODELSIM_PATH%;%PATH%"
 echo ModelSim path set to: %MODELSIM_PATH%
 
-rem === Check vlib.exe ===
-if not exist "%MODELSIM_PATH%\vlib.exe" (
-    echo ERROR: vlib.exe not found in "%MODELSIM_PATH%"
-    goto ask_path
-)
+rem === Python Environment Setup ===
+set "VENV_DIR=venv"
+set "PYTHON_BIN=python"
 
-rem === Conda env check ===
-if not defined CONDA_PREFIX (
-    echo ERROR: Conda env not active.  ^(Please run 'conda activate als' first^)
-    pause & exit /b 1
-)
-set "PYTHON_BIN=%CONDA_PREFIX%\python.exe"
-if not exist "%PYTHON_BIN%" (
-    echo ERROR: python.exe not found in "%CONDA_PREFIX%"
-    pause & exit /b 1
-)
-echo Python found: %PYTHON_BIN%
-
-rem === Pillow check ===
-"%PYTHON_BIN%" -c "import PIL" >nul 2>&1
+rem Check if Python is installed
+where python >nul 2>&1
 if errorlevel 1 (
-    echo WARNING: Pillow not installed.
-    "%PYTHON_BIN%" -m pip install pillow || (
-        echo Install Pillow failed.  Please run:
-        echo   "%PYTHON_BIN%" -m pip install pillow
-        pause
-    )
-) else (
-    echo Pillow module OK.
+    echo ERROR: Python not found. Please install Python 3.x from https://www.python.org/downloads/
+    pause & exit /b 1
 )
+
+rem Get Python version
+for /f "tokens=2" %%I in ('python --version 2^>^&1') do set PYTHON_VERSION=%%I
+echo Found Python version: %PYTHON_VERSION%
+
+rem Create venv if it doesn't exist
+if not exist "%VENV_DIR%" (
+    echo Creating Python virtual environment...
+    python -m venv "%VENV_DIR%" 2>nul
+    if errorlevel 1 (
+        echo Trying alternative venv creation method...
+        python -m virtualenv "%VENV_DIR%" 2>nul
+        if errorlevel 1 (
+            echo Failed to create virtual environment. Installing required packages globally...
+            python -m pip install --user pillow
+            set "PYTHON_BIN=python"
+            goto :python_setup_complete
+        )
+    )
+)
+
+rem Activate venv and install requirements
+echo Setting up Python environment...
+if exist "%VENV_DIR%\Scripts\activate.bat" (
+    call "%VENV_DIR%\Scripts\activate.bat"
+    set "PYTHON_BIN=%~dp0%VENV_DIR%\Scripts\python.exe"
+) else (
+    echo Virtual environment activation failed. Using system Python...
+    set "PYTHON_BIN=python"
+)
+
+:python_setup_complete
+rem Install required packages
+echo Installing required Python packages...
+"%PYTHON_BIN%" -m pip install --upgrade pip
+"%PYTHON_BIN%" -m pip install pillow
+
+echo Python environment setup complete.
 echo.
 
 :menu
@@ -88,30 +122,94 @@ echo 3. Compiling RTL & testbench...
 vlog -work work "../../rtl/image_proc/image_processor.v"          || goto error
 vlog -work work "../../rtl/cct_xyz/cct_to_xyz_converter.v"        || goto error
 vlog -work work "../../rtl/chromatic_adapt/bradford_chromatic_adapt.v" || goto error
+
+rem Copy testbench file first
+echo Copying testbench file...
+copy /Y ..\..\testbench\color_checker_tb.v . || (
+    echo ERROR: Failed to copy color_checker_tb.v
+    goto error
+)
+
 vlog -work work "./color_checker_tb.v"                            || goto error
 
 echo.
 echo 4. Launching ModelSim...
 vsim -c -t 1ps -L work -voptargs="+acc" work.color_checker_tb ^
-     -do "run -all; quit -f" -GCCT_VALUE=%cct_value% || goto error
+     -do "run -all; quit -f" -GCCT_VALUE=%cct_value%
+if not exist "color_checker_output.ppm" (
+    echo ERROR: Simulation did not generate output file
+    goto error
+)
 
 echo.
 echo 5. Converting PPM -> PNG…
-copy /Y ..\..\python\ppm_to_png.py .                              >nul
-"%PYTHON_BIN%" ppm_to_png.py color_checker_input.ppm  color_checker_input.png  || goto pyfail
-"%PYTHON_BIN%" ppm_to_png.py color_checker_output.ppm color_checker_output.png || goto pyfail
+set "PYTHON_SCRIPTS_DIR=..\..\python"
 
+rem Check if Python script exists
+if not exist "%PYTHON_SCRIPTS_DIR%\ppm_to_png.py" (
+    echo ERROR: ppm_to_png.py not found in %PYTHON_SCRIPTS_DIR%
+    goto error
+)
+
+rem Check if input PPM exists
+if not exist "color_checker_input.ppm" (
+    echo ERROR: color_checker_input.ppm not found
+    goto error
+)
+
+rem Check if output PPM exists
+if not exist "color_checker_output.ppm" (
+    echo ERROR: color_checker_output.ppm not found
+    goto error
+)
+
+rem Copy and run conversion script
+copy /Y "%PYTHON_SCRIPTS_DIR%\ppm_to_png.py" . >nul
+if errorlevel 1 (
+    echo ERROR: Failed to copy ppm_to_png.py
+    goto error
+)
+
+echo Converting input PPM to PNG...
+"%PYTHON_BIN%" ppm_to_png.py color_checker_input.ppm color_checker_input.png
+if errorlevel 1 (
+    echo ERROR: Failed to convert input PPM to PNG
+    echo Current directory: %CD%
+    echo Python script: %PYTHON_SCRIPTS_DIR%\ppm_to_png.py
+    goto pyfail
+)
+
+echo Converting output PPM to PNG...
+"%PYTHON_BIN%" ppm_to_png.py color_checker_output.ppm color_checker_output.png
+if errorlevel 1 (
+    echo ERROR: Failed to convert output PPM to PNG
+    echo Current directory: %CD%
+    echo Python script: %PYTHON_SCRIPTS_DIR%\ppm_to_png.py
+    goto pyfail
+)
+
+rem Verify PNG files were created
+if not exist "color_checker_input.png" (
+    echo ERROR: Failed to create color_checker_input.png
+    goto pyfail
+)
+if not exist "color_checker_output.png" (
+    echo ERROR: Failed to create color_checker_output.png
+    goto pyfail
+)
+
+echo PPM to PNG conversion completed successfully.
 echo.
-echo Simulation completed successfully!
-goto end_test
+goto end
 
 :pyfail
-echo Error converting PPM to PNG - check Pillow installation.
-goto end_test
-
-:end_test
-cd ../../
-:end
+echo Error converting PPM to PNG. Details:
+echo - Python executable: %PYTHON_BIN%
+echo - Current directory: %CD%
+echo - Python script location: %PYTHON_SCRIPTS_DIR%\ppm_to_png.py
+echo - Pillow installation check:
+"%PYTHON_BIN%" -c "import PIL; print('Pillow version:', PIL.__version__)" || echo Pillow not found
+goto end
 
 :get_cct_custom_image
 echo.
