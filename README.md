@@ -66,6 +66,7 @@ run_ca_compilation.bat
 ```
 
 This script:
+
 1. Creates/updates the Quartus project using create_ca_project.tcl
 2. Runs Analysis & Synthesis
 3. Performs Place & Route (Fitter)
@@ -85,11 +86,13 @@ run_ca_sim.bat
 ```
 
 This script provides an interactive menu with the following options:
+
 1. Color Checker Classic (6x4) - Simulates adaptation on standard color checker
 2. Custom PNG Image (768x512) - Process your own PNG image
 3. Exit
 
 **Color Checker Classic Simulation:**
+
 - Creates a 6x4 color checker input pattern
 - Runs the simulation in console mode (no GUI)
 - Generates output files in the `simulation/modelsim` directory:
@@ -100,6 +103,7 @@ This script provides an interactive menu with the following options:
   - `color_checker_output.txt`: Detailed patch information before and after adaptation
 
 **Custom PNG Image Simulation:**
+
 - Allows processing of user-provided 768x512 PNG images
 - Converts the PNG to PPM for processing
 - Generates output files in the `simulation/modelsim` directory:
@@ -108,11 +112,13 @@ This script provides an interactive menu with the following options:
   - `output_image.png`: Chromatically adapted image (PNG format)
 
 The simulation applies a warm-tinting adaptation matrix that:
+
 - Boosts red component (1.1×)
 - Slightly boosts green component (1.05×)
 - Reduces blue component (0.9×)
 
-**Prerequisites**: 
+**Prerequisites**:
+
 - ModelSim must be installed and in your PATH
 - Python with the Pillow library (`pip install pillow`) for PNG/PPM conversions
 
@@ -140,11 +146,31 @@ make all
 make clean
 ```
 
+#### Using Docker
+
+The project includes shell scripts for building and running Docker image.
+
+```bash
+# Clone the image installed with Quartus 13
+git clone https://github.com/vmunoz82/quartus13.git
+cd quartus13
+
+# Build docker
+docker buildx build --platform linux/amd64 \
+  -t quartus_base:13.0sp1 \
+  -f Dockerfile_with_modelsim . --load
+
+# Run Docker
+docker run --platform linux/amd64 -it --rm \
+  -v "$(pwd)":/work quartus_base:13.0sp1 bash
+```
+
 ## Implementation Details
 
 ### Fixed-Point Representation
 
 Color transformations use Q16.16 fixed-point format:
+
 - 16 bits for integer part
 - 16 bits for fractional part
 
@@ -163,6 +189,7 @@ The ALS interface implements I²C Fast mode (400 kHz) to communicate with the am
 ### System Status Indication
 
 The green LEDs on the DE2-115 board show system status:
+
 - LED[7]: ALS sensor communication status
 - LED[6]: CCT reading validity
 - LED[5]: XYZ conversion status
@@ -178,6 +205,7 @@ Each module has a dedicated testbench in the `testbench/` directory. See `testbe
 ## Performance Metrics
 
 The design targets the Altera Cyclone IV E FPGA on the DE2-115 board:
+
 - Operating frequency: 50 MHz
 - Resource utilization varies by module (see .rpt files for details)
 - Fixed-point precision allows accurate color transformations with efficient hardware usage

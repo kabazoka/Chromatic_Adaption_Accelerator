@@ -1,0 +1,90 @@
+###############################################################################
+# Quartus II 13.0 sp1 + ModelSim-ASE 10.1d  (Ubuntu 20.04 amd64)
+###############################################################################
+# Build: docker buildx build --platform linux/amd64 \
+#         -t quartus_base:13.0sp1 -f Dockerfile_with_modelsim . --load
+###############################################################################
+
+ARG  INSTALL_DIR=/opt/intelFPGA_lite/13.0sp1
+ARG  QUARTUS_INSTALLER=QuartusSetupWeb-13.0.1.232.run
+ARG  MODELSIM_INSTALLER=ModelSimSetup-13.0.1.232.run
+
+############################
+# 1) installer stage
+############################
+FROM --platform=linux/amd64 ubuntu:20.04 AS installer
+LABEL stage=builder
+ENV  DEBIAN_FRONTEND=noninteractive
+
+# re-declare build args inside this stage
+ARG  INSTALL_DIR
+ARG  QUARTUS_INSTALLER
+ARG  MODELSIM_INSTALLER
+
+# ensure we use the main mirror, not the ports mirror
+RUN sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+
+# copy the Intel installers into /tmp and make them executable
+COPY ${QUARTUS_INSTALLER} ${MODELSIM_INSTALLER} /tmp/
+RUN chmod +x /tmp/${QUARTUS_INSTALLER} /tmp/${MODELSIM_INSTALLER}
+
+# enable i386 repo and install all 32-bit libs ModelSim needs
+RUN dpkg --add-architecture i386 && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+	unzip \
+        gcc g++ make wget file build-essential gcc-multilib \
+        libc6:i386 libstdc++6:i386 zlib1g:i386 libncurses5:i386 \
+        libxft2:i386 libxext6:i386 libsm6:i386 libice6:i386 \
+        libxi6:i386 libxt6:i386 libxtst6:i386 libfontconfig1:i386 \
+        libfreetype6:i386 && \
+    rm -rf /var/lib/apt/lists/*
+
+# run the Intel installers (headless)
+RUN /tmp/${QUARTUS_INSTALLER}  --mode unattended --installdir ${INSTALL_DIR} && \
+    /tmp/${MODELSIM_INSTALLER} --mode unattended --installdir ${INSTALL_DIR} && \
+    rm -f /tmp/${QUARTUS_INSTALLER} /tmp/${MODELSIM_INSTALLER}
+
+############################
+# 2) runtime stage
+############################
+FROM --platform=linux/amd64 ubuntu:20.04
+LABEL maintainer="Hao Chen <kabazoka@gmail.com>"
+ENV  DEBIAN_FRONTEND=noninteractive
+
+ARG  INSTALL_DIR
+
+# minimal runtime i386 libs
+RUN dpkg --add-architecture i386 && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libncurses5:i386 libstdc++6:i386 zlib1g:i386 \
+        libxft2:i386 libxext6:i386 libsm6:i386 libice6:i386 \
+        libxi6:i386 libxt6:i386 libxtst6:i386 libfontconfig1:i386 \
+        libfreetype6:i386 && \
+    rm -rf /var/lib/apt/lists/*
+
+# copy Quartus + ModelSim from installer stage
+COPY --from=installer ${INSTALL_DIR} ${INSTALL_DIR}
+
+# Set QUARTUS_ROOTDIR and expose Quartus & ModelSim on PATH
+ENV QUARTUS_ROOTDIR=${INSTALL_DIR}/quartus
+ENV PATH=${QUARTUS_ROOTDIR}/bin:${INSTALL_DIR}/modelsim_ase/bin:$PATH
+
+WORKDIR /workspace
+CMD ["bash"]
+
+# Make ModelSim path
+RUN ln -s /opt/intelFPGA_lite/13.0sp1/modelsim_ase/linuxaloem \
+         /opt/intelFPGA_lite/13.0sp1/modelsim_ase/linux_rh60
+
+# ---- Add Cyclone IV/E device family ----------------------------------------
+COPY cyclone_web-13.0.1.232.qdz /tmp/
+
+RUN apt-get update && apt-get install -y --no-install-recommends unzip python3 python3-pip itcl3-dev && \
+    cd /opt/intelFPGA_lite/13.0sp1 && \
+    unzip -oq /tmp/cyclone_web-13.0.1.232.qdz && \
+    cd ${QUARTUS_ROOTDIR} && echo 'foreach family [get_device_families] { puts "Device family: $family" }' | quartus_sh -s && \
+    rm /tmp/cyclone_web-13.0.1.232.qdz && \
+    apt-get purge -y unzip && apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
