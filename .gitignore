@@ -20,6 +20,10 @@ incremental_db/
 *.sld
 *.qws
 *.bak
+*.qpf
+*.qsf
+*.qsfs
+*.ddb
 
 # ModelSim simulation files
 *.wlf
