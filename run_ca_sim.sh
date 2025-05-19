@@ -16,6 +16,35 @@ VLOG=$(command -v vlog || echo "")
 VSIM=$(command -v vsim || echo "")
 VMAP=$(command -v vmap || echo "")
 
+# Get the script directory for absolute paths
+get_script_dir() {
+    # Try using readlink -f first (works on Linux)
+    local path
+    if path=$(readlink -f "$0" 2>/dev/null); then
+        dirname "$path"
+        return
+    fi
+    
+    # Fallback for macOS
+    local src="${BASH_SOURCE[0]}"
+    while [ -h "$src" ]; do
+        local dir="$(cd -P "$(dirname "$src")" && pwd)"
+        src="$(readlink "$src")"
+        [[ $src != /* ]] && src="$dir/$src"
+    done
+    cd -P "$(dirname "$src")" && pwd
+}
+
+SCRIPT_DIR=$(get_script_dir)
+WRAPPER_SCRIPT="${SCRIPT_DIR}/run_vsim_wrapper.sh"
+
+# Check if wrapper exists and use it
+if [[ -f "${WRAPPER_SCRIPT}" ]]; then
+    chmod +x "${WRAPPER_SCRIPT}"
+    VSIM="${WRAPPER_SCRIPT}"
+    echo "Using ModelSim wrapper script: ${WRAPPER_SCRIPT}"
+fi
+
 # Check if tools exist
 if [[ -z "$VLIB" ]]; then
     echo "Error: vlib not found in PATH"
@@ -135,7 +164,27 @@ make_lib () {
 
 # Define Tcl commands to disable GUI - used within the vsim -do option
 DISABLE_GUI_COMMANDS='
+# Disable Tcl interactivity
+global tcl_interactive
+set tcl_interactive 0
+
+# Catch and ignore all package requires
+rename package __original_package
+proc package {args} {
+  set cmd [lindex $args 0]
+  set pkg [lindex $args 1]
+  if {$cmd == "require"} {
+    puts "Skipping package require: $pkg"
+    return 1
+  }
+  catch {eval __original_package $args} result
+  return $result
+}
+
+# Disable all GUI procs
+proc GUIInit {} { return }
 proc GUIInit_TK {} { return }
+proc tk_messageBox {args} { return ok }
 proc WaveRestoreZoom {} { return }
 proc PrefMain {} { return }
 proc Wave {} { return }
@@ -143,6 +192,10 @@ proc WaveW {} { return }
 proc WindowC {} { return }
 proc WinMain {} { return }
 proc XWin {} { return }
+
+# Auto-run
+run -all
+quit -f
 '
 
 run_color_checker () {
@@ -152,7 +205,20 @@ run_color_checker () {
     echo "=== Color-Checker Classic (CCT=${cct} K) ==="
     mkdir -p simulation/modelsim && cd simulation/modelsim
     
+    # Check if readlink -f failed (common on macOS)
+    if [[ ! -f "${VSIM}" && -f "${SCRIPT_DIR}/../run_vsim_wrapper.sh" ]]; then
+        echo "Copying wrapper script to local directory"
+        cp -f "${SCRIPT_DIR}/../run_vsim_wrapper.sh" ./run_vsim_wrapper.sh
+        chmod +x ./run_vsim_wrapper.sh
+        VSIM_LOCAL="./run_vsim_wrapper.sh"
+    else
+        VSIM_LOCAL="${VSIM}"
+    fi
+    
     make_lib
+
+    echo "--> Copying testbench file"
+    cp -f ../../testbench/color_checker_tb.v .
 
     echo "--> Compiling RTL & testbench"
     "$VLOG" -work work ../../rtl/image_proc/image_processor.v
@@ -162,8 +228,8 @@ run_color_checker () {
 
     echo "--> Running ModelSim (console)"
     # Force strict console mode with GUI-disabling commands
-    "$VSIM" -c -quiet -novopt -t 1ps -L work \
-         work.color_checker_tb -do "${DISABLE_GUI_COMMANDS}; run -all; quit -f" \
+    "$VSIM_LOCAL" -c -notclpkg -notk -notcltk -nogui -quiet -novopt -t 1ps -L work \
+         work.color_checker_tb -do "${DISABLE_GUI_COMMANDS}" \
          -GCCT_VALUE="$cct"
 
     echo "--> Converting PPM → PNG"
@@ -177,6 +243,16 @@ run_color_checker () {
 
 run_custom_png () {
     mkdir -p simulation/modelsim && cd simulation/modelsim
+    
+    # Check if readlink -f failed (common on macOS)
+    if [[ ! -f "${VSIM}" && -f "${SCRIPT_DIR}/../run_vsim_wrapper.sh" ]]; then
+        echo "Copying wrapper script to local directory"
+        cp -f "${SCRIPT_DIR}/../run_vsim_wrapper.sh" ./run_vsim_wrapper.sh
+        chmod +x ./run_vsim_wrapper.sh
+        VSIM_LOCAL="./run_vsim_wrapper.sh"
+    else
+        VSIM_LOCAL="${VSIM}"
+    fi
     
     make_lib
 
@@ -195,8 +271,8 @@ run_custom_png () {
     "$VLOG" -work work ./image_tb.v
 
     # Force strict console mode with GUI-disabling commands
-    "$VSIM" -c -notclpkg -quiet -novopt -t 1ps -L work \
-         work.image_tb -do "${DISABLE_GUI_COMMANDS}; run -all; quit -f"
+    "$VSIM_LOCAL" -c -do batchmode -notclpkg -notk -notcltk -nogui -quiet -novopt -t 1ps -L work \
+         work.image_tb -do "${DISABLE_GUI_COMMANDS}"
 
     cp -f ../../python/ppm_to_png.py .
     "$PYTHON_BIN" ppm_to_png.py output_image.ppm output_image.png

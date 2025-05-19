@@ -81,7 +81,7 @@ RUN ln -s /opt/intelFPGA_lite/13.0sp1/modelsim_ase/linuxaloem \
 # ---- Add Cyclone IV/E device family ----------------------------------------
 COPY cyclone_web-13.0.1.232.qdz /tmp/
 
-RUN apt-get update && apt-get install -y --no-install-recommends unzip python3 python3-pip itcl3-dev && \
+RUN apt-get update && apt-get install -y --no-install-recommends unzip python3 python3-pip itcl3 itcl3-dev && \
     cd /opt/intelFPGA_lite/13.0sp1 && \
     unzip -oq /tmp/cyclone_web-13.0.1.232.qdz && \
     cd ${QUARTUS_ROOTDIR} && echo 'foreach family [get_device_families] { puts "Device family: $family" }' | quartus_sh -s && \

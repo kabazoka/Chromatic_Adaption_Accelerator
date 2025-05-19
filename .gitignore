@@ -30,3 +30,7 @@ simulation/modelsim/
 # pycache
 __pycache__/
 *.pyc
+
+# Quartus installation
+*.run
+*.qdz

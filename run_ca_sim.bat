@@ -119,10 +119,6 @@ rem (omitted) -- Original echo PPM generation block remains unchanged --
 
 echo.
 echo 3. Compiling RTL & testbench...
-vlog -work work "../../rtl/image_proc/image_processor.v"          || goto error
-vlog -work work "../../rtl/cct_xyz/cct_to_xyz_converter.v"        || goto error
-vlog -work work "../../rtl/chromatic_adapt/bradford_chromatic_adapt.v" || goto error
-
 rem Copy testbench file first
 echo Copying testbench file...
 copy /Y ..\..\testbench\color_checker_tb.v . || (
@@ -130,11 +126,14 @@ copy /Y ..\..\testbench\color_checker_tb.v . || (
     goto error
 )
 
+vlog -work work "../../rtl/image_proc/image_processor.v"          || goto error
+vlog -work work "../../rtl/cct_xyz/cct_to_xyz_converter.v"        || goto error
+vlog -work work "../../rtl/chromatic_adapt/bradford_chromatic_adapt.v" || goto error
 vlog -work work "./color_checker_tb.v"                            || goto error
 
 echo.
 echo 4. Launching ModelSim...
-vsim -c -t 1ps -L work -voptargs="+acc" work.color_checker_tb ^
+vsim -c -notclpkg -t 1ps -L work -voptargs="+acc" work.color_checker_tb ^
      -do "run -all; quit -f" -GCCT_VALUE=%cct_value%
 if not exist "color_checker_output.ppm" (
     echo ERROR: Simulation did not generate output file

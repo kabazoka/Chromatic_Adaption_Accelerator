@@ -165,6 +165,68 @@ docker run --platform linux/amd64 -it --rm \
   -v "$(pwd)":/work quartus_base:13.0sp1 bash
 ```
 
+### ModelSim in Docker Troubleshooting
+
+If you encounter ModelSim issues in the Docker container (particularly "can't find package Itcl" errors), use these solutions:
+
+#### Solution 1: Use the Wrapper Script (Recommended)
+
+The repository includes a ModelSim wrapper script to handle common issues:
+
+```bash
+# Make sure the wrapper is executable
+chmod +x run_vsim_wrapper.sh
+
+# The script will automatically be used by run_ca_sim.sh
+./run_ca_sim.sh
+```
+
+#### Solution 2: Install Required Packages
+
+If you still encounter issues, install these packages inside the Docker container:
+
+```bash
+# Install required packages
+apt-get update && apt-get install -y tcl8.6 tcl8.6-dev tk8.6 tk8.6-dev itcl3 itcl3-dev
+
+# Set environment variables
+export TCL_LIBRARY=/usr/share/tcltk/tcl8.6
+export TK_LIBRARY=/usr/share/tcltk/tk8.6
+export MTI_NOGUI=1
+
+# Run simulation script
+./run_ca_sim.sh
+```
+
+#### Solution 3: Run the Patch Script
+
+A patch script is provided to modify ModelSim's startup files:
+
+```bash
+# Inside the Docker container
+chmod +x modelsim_docker_patch.sh
+./modelsim_docker_patch.sh
+
+# Then run the simulation
+./run_ca_sim.sh
+```
+
+#### Solution 4: Manual Patching
+
+If the patch script doesn't work, you can modify ModelSim's startup files manually:
+
+```bash
+# Inside the Docker container
+cd /opt/intelFPGA_lite/13.0sp1/modelsim_ase/tcl/vsim
+cp vsim vsim.original
+sed -i 's/package require Itcl/catch {package require Itcl}/g' vsim
+sed -i 's/package require Tk/catch {package require Tk}/g' vsim
+
+# Then run your simulation
+cd /work
+./run_ca_sim.sh
+```
+
 ## Implementation Details
 
 ### Fixed-Point Representation
